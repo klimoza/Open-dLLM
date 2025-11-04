@@ -49,4 +49,4 @@ train:
   save_hf_weights: true
   wandb_project: Qwen2.5-Coder-0.5B
   wandb_name: Qwen2.5-Coder-0.5B-PT
-  use_wandb: true
+  use_wandb: false

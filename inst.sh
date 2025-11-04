@@ -1,6 +1,7 @@
 python -m venv .venv
 source .venv/bin/activate
 "${SHELL}" <(curl -L micro.mamba.pm/install.sh)
+source ~/.zshrc
 micromamba install -c nvidia/label/cuda-12.3.0 cuda-toolkit -y
 pip install ninja
 pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu121
@@ -13,3 +14,4 @@ pip install --upgrade --no-cache-dir \
 pip install "flash-attn==2.7.4.post1" \
   --extra-index-url https://github.com/Dao-AILab/flash-attention/releases/download
 pip install -e .
+pip install -e lm-evaluation-harness human-eval-infilling

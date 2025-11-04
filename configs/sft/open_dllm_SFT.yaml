@@ -4,7 +4,7 @@ model:
 
 data:
   train_path: ./open_code_instruct/data  # Updated to local path
-  train_size: 300_000_000 # 1T tokens
+  train_size: 600_000_000 # 1T tokens
   dataloader_type: native
   data_type: sft_data
   max_seq_len: 4096
@@ -49,4 +49,4 @@ train:
   save_hf_weights: true
   wandb_project: Open_DLLM_SFT
   wandb_name: Open_DLLM_SFT-NvidiaOpenInstruct
-  use_wandb: false
+  use_wandb: true

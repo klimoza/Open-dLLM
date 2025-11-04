@@ -1,11 +1,12 @@
 #!/bin/bash
 
-MODEL_PATH="fredzzp/open-dcoder-0.5B"
+# MODEL_PATH="fredzzp/open-dcoder-0.5B"
+MODEL_PATH="/home/ubuntu/working_dir/logs/Open_DLLM_SFT/checkpoints/global_step_287/hf_ckpt"
 MAX_NEW_TOKENS=128
 STEPS=128
 TEMPERATURE=0.8
 ALG="p2"
-NUM_PROCESSES=4
+NUM_PROCESSES=1
 
 
 export CUDA_VISIBLE_DEVICES="0"
