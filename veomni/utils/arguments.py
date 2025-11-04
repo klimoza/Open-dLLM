@@ -126,7 +126,7 @@ class DataArguments:
         default=10_000_000,
         metadata={"help": "Number of tokens for training to compute training steps for dynamic batch dataloader."},
     )
-    data_type: Literal["plaintext", "conversation"] = field(
+    data_type: Literal["plaintext", "conversation", "sft_data"] = field(
         default="conversation",
         metadata={"help": "Type of the training data."},
     )
@@ -145,6 +145,10 @@ class DataArguments:
     data_tag: Literal["default", "mmtag"] = field(
         default="default",
         metadata={"help": "Dataset tag for multimodal training."},
+    )
+    prompt_keys: str = field(
+        default=None,
+        metadata={"help": "Key to get prompt from the training data."},
     )
     text_keys: str = field(
         default=None,

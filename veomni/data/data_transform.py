@@ -14,6 +14,7 @@
 
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Union
+from .constants import IGNORE_INDEX
 
 import torch
 
@@ -70,6 +71,49 @@ def process_pretrain_example(
 
 
 def process_sft_example(
+    example: Dict[str, Any],
+    tokenizer: "PreTrainedTokenizer",
+    max_seq_len: int,
+    text_keys: Union[str, List[str]] = "content_split",
+    prompt_keys: Union[str, List[str]] = "input",
+) -> List[Dict[str, "torch.Tensor"]]:
+    if isinstance(prompt_keys, str):
+        prompt_example = example[prompt_keys]
+    elif isinstance(prompt_keys, list):
+        for key in prompt_keys:
+            if key in example:
+                prompt_example = example[key]
+                break
+    else:
+        raise ValueError(f"prompt_keys must be a string or a list of strings, but got {type(prompt_keys)}")
+
+    if isinstance(text_keys, str):
+        text_example = example[text_keys]
+    elif isinstance(text_keys, list):
+        for key in text_keys:
+            if key in example:
+                text_example = example[key]
+                break
+    else:
+        raise ValueError(f"text_keys must be a string or a list of strings, but got {type(text_keys)}")
+
+    prompt_tokens = tokenizer.encode(prompt_example, add_special_tokens=False)
+    prompt_tokens = prompt_tokens + [tokenizer.eos_token_id]
+    text_tokens = tokenizer.encode(text_example, add_special_tokens=False) + [tokenizer.eos_token_id]
+    
+    input_ids = (prompt_tokens + text_tokens)[:max_seq_len]
+    attention_mask = [1] * len(input_ids)
+    labels = [IGNORE_INDEX] * len(prompt_tokens) + text_tokens
+    examples = [
+        {
+            "input_ids": torch.tensor(input_ids),
+            "attention_mask": torch.tensor(attention_mask),
+            "labels": torch.tensor(labels),
+        }
+    ]
+    return examples
+
+def process_chat_example(
     example: Dict[str, Any],
     chat_template: "ChatTemplate",
     max_seq_len: int,

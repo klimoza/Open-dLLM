@@ -17,7 +17,7 @@ from veomni.data import (
     build_iterative_dataset,
     build_mapping_dataset,
 )
-from veomni.data.data_transform import process_pretrain_example, process_sft_example
+from veomni.data.data_transform import process_pretrain_example, process_sft_example, process_chat_example
 from veomni.distributed.offloading import build_activation_offloading_context
 from veomni.distributed.parallel_state import get_parallel_state, init_parallel_state
 from veomni.distributed.torch_parallelize import build_parallelize_model
@@ -75,10 +75,18 @@ def main():
             max_seq_len=args.data.max_seq_len,
             text_keys=args.data.text_keys,
         )
+    elif args.data.data_type == "sft_data":
+        transform = partial(
+            process_sft_example,
+            tokenizer=tokenizer,
+            max_seq_len=args.data.max_seq_len,
+            text_keys=args.data.text_keys,
+            prompt_keys=args.data.prompt_keys,
+        )
     elif args.data.data_type == "conversation":
         chat_template = build_chat_template(args.data.chat_template, tokenizer)
         transform = partial(
-            process_sft_example,
+            process_chat_example,
             chat_template=chat_template,
             max_seq_len=args.data.max_seq_len,
             text_keys=args.data.text_keys,
@@ -189,7 +197,7 @@ def main():
             profiler.start()
 
         # save model_assets before training
-        model_assets = [model_config, tokenizer if args.data.data_type == "plaintext" else chat_template]
+        model_assets = [model_config, tokenizer if args.data.data_type == "plaintext" or args.data.data_type == "sft_data" else chat_template]
         save_model_assets(args.train.model_assets_dir, model_assets)
 
     start_epoch, start_step, global_step = 0, 0, 0

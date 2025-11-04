@@ -1,22 +1,22 @@
 model:
-  model_path: Qwen/Qwen2.5-Coder-0.5B
+  model_path: fredzzp/open-dcoder-0.5B
   attn_implementation: flash_attention_2
 
 data:
-  train_path: ./hf_data/fine_code/data  # Updated to local path
-  train_size: 1_000_000_000_000 # 1T tokens
+  train_path: ./open_code_instruct/data  # Updated to local path
+  train_size: 300_000_000 # 1T tokens
   dataloader_type: native
-  data_type: plaintext
+  data_type: sft_data
   max_seq_len: 4096
-  text_keys: text
+  prompt_keys: input
+  text_keys: output
   drop_last: true
   datasets_type: mapping
   prefetch_factor: 2
   num_workers: 2
 
 train:
-  output_dir: logs/Qwen2.5-Coder-0.5B_mdm
-  repr_align_wt: 0.0  # Weight for representation alignment loss (0 = disabled)
+  output_dir: logs/Open_DLLM_SFT
   data_parallel_mode: ddp
   ulysses_parallel_size: 1
   global_batch_size: 512
@@ -28,11 +28,11 @@ train:
   dyn_bsz_margin: 0
   dyn_bsz_buffer_size: 100
   optimizer: adamw
-  lr: 3.0e-4 # 2e-5
+  lr: 1.0e-4
   lr_decay_style: cosine
-  lr_warmup_ratio: 0.01
+  lr_warmup_ratio: 0.02
   lr_decay_ratio: 1.0  # Use full training for decay
-  lr_min: 3e-6        # Minimum LR
+  lr_min: 1e-6        # Minimum LR
   weight_decay: 0.01
   max_grad_norm: 1.0
   enable_mixed_precision: false
@@ -45,8 +45,8 @@ train:
   empty_cache_steps: 1000
   ckpt_manager: bytecheckpoint
   load_checkpoint_path: ""
-  save_steps: 10_000
+  save_steps: 40
   save_hf_weights: true
-  wandb_project: Qwen2.5-Coder-0.5B
-  wandb_name: Qwen2.5-Coder-0.5B-PT
-  use_wandb: true
+  wandb_project: Open_DLLM_SFT
+  wandb_name: Open_DLLM_SFT-NvidiaOpenInstruct
+  use_wandb: false
