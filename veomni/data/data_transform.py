@@ -98,12 +98,12 @@ def process_sft_example(
         raise ValueError(f"text_keys must be a string or a list of strings, but got {type(text_keys)}")
 
     prompt_tokens = tokenizer.encode(prompt_example, add_special_tokens=False)
-    prompt_tokens = prompt_tokens + [tokenizer.eos_token_id]
     text_tokens = tokenizer.encode(text_example, add_special_tokens=False) + [tokenizer.eos_token_id]
     
-    input_ids = (prompt_tokens + text_tokens)[:max_seq_len]
+    input_ids = (prompt_tokens + text_tokens)
     attention_mask = [1] * len(input_ids)
-    labels = [IGNORE_INDEX] * len(prompt_tokens) + text_tokens
+    # labels = [IGNORE_INDEX] * len(prompt_tokens) + text_tokens
+    labels = input_ids
     examples = [
         {
             "input_ids": torch.tensor(input_ids),

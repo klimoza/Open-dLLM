@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # MODEL_PATH="fredzzp/open-dcoder-0.5B"
-MODEL_PATH="/home/ubuntu/working_dir/logs/Open_DLLM_SFT/checkpoints/global_step_287/hf_ckpt"
+MODEL_PATH="/home/ubuntu/working_dir/logs/Open_DLLM_SFT/checkpoints/global_step_1000/hf_ckpt"
 MAX_NEW_TOKENS=128
 STEPS=128
 TEMPERATURE=0.8

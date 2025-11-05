@@ -1,0 +1,1 @@
+python eval/eval_completion/visualize_generations.py /home/ubuntu/working_dir/eval/eval_completion/evals_results/humaneval-ns0/__home__ubuntu__working_dir__logs__Open_DLLM_SFT__checkpoints__global_step_1000__hf_ckpt/samples_humaneval_2025-11-05T16-17-58.301324.jsonl --index 0

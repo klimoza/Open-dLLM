@@ -3,6 +3,7 @@ source .venv/bin/activate
 "${SHELL}" <(curl -L micro.mamba.pm/install.sh)
 source ~/.zshrc
 micromamba install -c nvidia/label/cuda-12.3.0 cuda-toolkit -y
+pip install -r requirements.txt
 pip install ninja
 pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu121
 pip install --upgrade --no-cache-dir \

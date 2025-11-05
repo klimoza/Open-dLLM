@@ -11,6 +11,7 @@ __pycache__/
 .jettrain_run/
 logs/
 open_code_instruct/
+openai_humaneval
 
 # Distribution / packaging
 
