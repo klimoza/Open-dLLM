@@ -20,11 +20,11 @@ def load_samples(jsonl_path: str) -> List[Dict]:
     return samples
 
 
-def format_code(text: str, max_lines: int = None) -> str:
-    """Format code with proper indentation."""
+def format_code(text: str) -> str:
+    """Format code with proper indentation, removing trailing whitespaces."""
     lines = text.split('\n')
-    if max_lines and len(lines) > max_lines:
-        lines = lines[:max_lines] + [f"... ({len(lines) - max_lines} more lines)"]
+    # Remove trailing whitespaces from each line
+    lines = [line.rstrip() for line in lines]
     return '\n'.join(lines)
 
 
@@ -50,7 +50,7 @@ def visualize_sample(sample: Dict, index: int = None, show_all_responses: bool =
     
     # Prompt
     prompt = doc.get('prompt', '')
-    print_section("📝 PROMPT", format_code(prompt, max_lines=30))
+    print_section("📝 PROMPT", format_code(prompt))
     
     # Canonical Solution
     canonical = doc.get('canonical_solution', '')
@@ -85,20 +85,17 @@ def visualize_sample(sample: Dict, index: int = None, show_all_responses: bool =
             if filtered_to_show and i < len(filtered_to_show):
                 filtered = filtered_to_show[i]
                 if filtered != resp and filtered.strip():
-                    print(f"  [FILTERED]: {filtered[:200]}")
+                    print(f"  [FILTERED]: {format_code(filtered)}")
                     print()
             
             # Show full response
-            if show_all_responses or i < 3:  # Always show first 3
-                resp_formatted = format_code(resp, max_lines=20)
-                print(f"  {resp_formatted}")
-            else:
-                print(f"  {resp[:200]}...")
+            resp_formatted = format_code(resp)
+            print(f"  {resp_formatted}")
     
     # Target (test code)
     target = sample.get('target', '')
     if target:
-        print_section("🎯 TARGET (Test Code)", format_code(target, max_lines=20))
+        print_section("🎯 TARGET (Test Code)", format_code(target))
 
 
 def print_summary(samples: List[Dict]):

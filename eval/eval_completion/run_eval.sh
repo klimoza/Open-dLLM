@@ -1,15 +1,15 @@
 #!/bin/bash
 
-# MODEL_PATH="fredzzp/open-dcoder-0.5B"
-MODEL_PATH="/home/ubuntu/working_dir/logs/Open_DLLM_SFT/checkpoints/global_step_1000/hf_ckpt"
+MODEL_PATH="fredzzp/open-dcoder-0.5B"
+# MODEL_PATH="/home/ubuntu/working_dir/logs/Open_DLLM_SFT/checkpoints/global_step_150/hf_ckpt"
 MAX_NEW_TOKENS=128
 STEPS=128
 TEMPERATURE=0.8
 ALG="p2"
-NUM_PROCESSES=1
+NUM_PROCESSES=8
 
 
-export CUDA_VISIBLE_DEVICES="0"
+export CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
 export HF_ALLOW_CODE_EVAL=1
 
 accelerate launch --num_processes $NUM_PROCESSES eval.py \
@@ -20,6 +20,7 @@ accelerate launch --num_processes $NUM_PROCESSES eval.py \
     --batch_size 10 \
     --output_path evals_results/humaneval-ns0 \
     --log_samples \
+    --seed 428 \
     --confirm_run_unsafe_code
 
 # accelerate launch --num_processes $NUM_PROCESSES eval.py \
