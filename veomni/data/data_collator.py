@@ -148,13 +148,15 @@ class DataCollatorWithPositionIDsMasking(DataCollator):
     """
     def __init__(self, mask_token_id: int,):
         self.mask_token_id = mask_token_id
-    def _random_masking(self, input_ids: "torch.Tensor",) -> "torch.Tensor":
+    def _random_masking(self, input_ids: "torch.Tensor", labels: "torch.Tensor") -> "torch.Tensor":
         """
         Randomly mask input_ids.
         """
+        old_input_ids = input_ids.clone()
         mask_ratio = torch.rand(1, device=input_ids.device).clamp(1/500, 1-1/500)
         mask_indices = torch.rand_like(input_ids.float()) < mask_ratio
         input_ids[mask_indices] = self.mask_token_id
+        input_ids[labels == IGNORE_INDEX] = old_input_ids[labels == IGNORE_INDEX]
         return input_ids, mask_ratio.repeat(input_ids.size(0))
 
     def __call__(self, features: Sequence[Dict[str, "torch.Tensor"]]) -> Dict[str, "torch.Tensor"]:
@@ -163,7 +165,7 @@ class DataCollatorWithPositionIDsMasking(DataCollator):
             if input_name in ("input_ids", "attention_mask", "labels", "position_ids"):
                 # Apply random masking only to input_ids, concatenate all features
                 if input_name == "input_ids":
-                    masked_features = [self._random_masking(feature[input_name]) for feature in features]
+                    masked_features = [self._random_masking(feature[input_name], feature["labels"]) for feature in features]
                     batch[input_name] = torch.cat(list(i[0] for i in masked_features), dim=-1).unsqueeze(0)
                     batch["mask_ratio"] = torch.cat(list(i[1] for i in masked_features), dim=-1).unsqueeze(0)
                 else:

@@ -102,8 +102,8 @@ def process_sft_example(
     
     input_ids = (prompt_tokens + text_tokens)
     attention_mask = [1] * len(input_ids)
-    # labels = [IGNORE_INDEX] * len(prompt_tokens) + text_tokens
-    labels = input_ids
+    labels = [IGNORE_INDEX] * len(prompt_tokens) + text_tokens
+    # labels = input_ids
     examples = [
         {
             "input_ids": torch.tensor(input_ids),

@@ -261,6 +261,7 @@ def main():
             total_loss = 0
             torch.cuda.synchronize()
             start_time = time.time()
+            breakpoint()
             for micro_batch in micro_batches:
                 environ_meter.add(micro_batch)
 
