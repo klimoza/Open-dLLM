@@ -125,6 +125,8 @@ def main():
             pin_memory=args.data.pin_memory,
             prefetch_factor=args.data.prefetch_factor,
         )
+        # for i in train_dataloader:
+        #     breakpoint()
     else:
         raise NotImplementedError(f"Unsupported dataloader type: {args.data.dataloader_type}.")
 
@@ -270,18 +272,20 @@ def main():
                 }
                 with model_fwd_context:
                     loss: "torch.Tensor" = model(**micro_batch, use_cache=False).loss.mean() / len(micro_batches)
-
+                print(f"Loss value: {loss.item()}")
+                print(f"Loss requires_grad: {loss.requires_grad}")
+                print(f"Loss grad_fn: {loss.grad_fn}")
+                breakpoint()
                 with model_bwd_context:
                     loss.backward()
-
+                breakpoint()
                 total_loss += loss.item()
                 del micro_batch
-
+            
             if args.train.data_parallel_mode == "fsdp1":
                 grad_norm = model.clip_grad_norm_(args.train.max_grad_norm).item()
             else:
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.train.max_grad_norm, foreach=True)
-
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()

@@ -949,7 +949,9 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel,  MDMGenerationMixin):
                     path_loss = (-loss).exp().detach() * loss
                     loss = loss + path_loss
                     loss_mask = labels != IGNORE_INDEX
-                    loss = (loss * loss_mask * (1/mask_ratio)).sum() / (loss_mask.sum() + 1e-8)
+                    mask_ratio_scalar = mask_ratio.mean()
+                    breakpoint()
+                    loss = (loss * loss_mask * (1/mask_ratio_scalar)).sum() / (loss_mask.sum() + 1e-8)
                 else:
                     loss_fct = LigerFusedLinearCrossEntropyLoss(reduction="mean")
                     if not get_parallel_state().sp_enabled:

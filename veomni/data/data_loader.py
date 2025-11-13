@@ -133,7 +133,6 @@ def build_dataloader(
             shuffle=True,
             seed=seed,
         )
-
     dataloader = DistributedDataloader(
         dataset,
         batch_size=dataloader_batch_size,
@@ -144,6 +143,9 @@ def build_dataloader(
         drop_last=drop_last,
         prefetch_factor=prefetch_factor,
     )
+    # for i in dataloader:
+    #     breakpoint()
+    # breakpoint()
     if use_rmpad:
         dataloader = DynamicBatchSizeDataLoader(
             dataloader,

@@ -53,6 +53,7 @@ class DynBszBuffer:
         cum_seq_len = 0
         samples = []
         while self.cur_idx < len(self._buffer) and cum_seq_len < n_token_per_iter:
+            # breakpoint()
             seq_len = self._buffer_sample_lens[self.cur_idx]
             if self.cur_idx not in self.del_idxs and (
                 (force is True and cum_seq_len == 0) or (seq_len <= n_token_per_iter - cum_seq_len)
@@ -62,6 +63,7 @@ class DynBszBuffer:
                 self.del_idxs.append(self.cur_idx)
             self.cur_idx += 1
         assert len(samples) > 0
+        # breakpoint()
         return samples
 
     def __len__(self):
@@ -202,6 +204,7 @@ class TextBatchingStrategy(BaseBatchingStrategy):
         ), "The token num to get for each request should be divisible by token micro bsz."
         n_iter = int(cur_token_micro_bsz // n_token_per_iter)
         data = []
+        # breakpoint()
         for i in range(n_iter):
             samples = self.buffer.get_samples(n_token_per_iter)
             if self.packer:

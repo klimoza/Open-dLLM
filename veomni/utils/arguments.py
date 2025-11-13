@@ -471,6 +471,7 @@ class TrainingArguments:
             raise ValueError("Gradient accumulation is not supported with FSDP offload.")
 
         self.dataloader_batch_size = self.global_batch_size // self.data_parallel_size  # = micro bsz * grad accu
+        self.dataloader_batch_size = 1
 
         # merlin save paths
         self.save_checkpoint_path = os.path.join(self.output_dir, "checkpoints")

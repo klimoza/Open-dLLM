@@ -176,5 +176,4 @@ def build_iterative_dataset(
     dataset = load_dataset(file_extenstion, data_files=data_files, split=namespace, streaming=True)
     dataset = dataset.shuffle(seed=seed, buffer_size=10_000)
     dataset = split_dataset_by_node(dataset, parallel_state.dp_rank, parallel_state.dp_size)
-
     return IterativeDataset(dataset, transform)
