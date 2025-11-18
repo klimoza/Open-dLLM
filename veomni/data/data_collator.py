@@ -154,6 +154,7 @@ class DataCollatorWithPositionIDsMasking(DataCollator):
         """
         old_input_ids = input_ids.clone()
         mask_ratio = torch.rand(1, device=input_ids.device).clamp(1/500, 1-1/500)
+        # mask_ratio = torch.tensor([1-1/500], device=input_ids.device)
         mask_indices = torch.rand_like(input_ids.float()) < mask_ratio
         input_ids[mask_indices] = self.mask_token_id
         input_ids[labels == IGNORE_INDEX] = old_input_ids[labels == IGNORE_INDEX]

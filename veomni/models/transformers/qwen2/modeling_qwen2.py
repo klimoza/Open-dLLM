@@ -946,12 +946,24 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel,  MDMGenerationMixin):
                         hidden_states.view(-1, self.config.hidden_size),
                         labels
                     )
+                    # logits = hidden_states.view(-1, self.config.hidden_size) @ self.lm_head.weight.t()
+                    # ref_loss = torch.nn.functional.cross_entropy(
+                    #     logits,
+                    #     labels,
+                    #     ignore_index=IGNORE_INDEX,
+                    #     reduction="none",
+                    # )
+                    
                     path_loss = (-loss).exp().detach() * loss
+                    # ref_path_loss = (-ref_loss).exp().detach() * ref_loss
                     loss = loss + path_loss
+                    # ref_loss = ref_loss + ref_path_loss
                     loss_mask = labels != IGNORE_INDEX
                     mask_ratio_scalar = mask_ratio.mean()
-                    breakpoint()
-                    loss = (loss * loss_mask * (1/mask_ratio_scalar)).sum() / (loss_mask.sum() + 1e-8)
+                    # (loss * loss_mask).sum().backward()
+                    ## REMOVED LOSS_MASK HERE BECAUSE IT'S BROKEN
+                    loss = (loss * (1/mask_ratio_scalar)).sum() / (loss_mask.sum() + 1e-8)
+                    # ref_loss = (ref_loss * (1/mask_ratio_scalar)).sum() / (loss_mask.sum() + 1e-8)
                 else:
                     loss_fct = LigerFusedLinearCrossEntropyLoss(reduction="mean")
                     if not get_parallel_state().sp_enabled:

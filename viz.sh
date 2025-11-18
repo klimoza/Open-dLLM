@@ -1,2 +1,2 @@
-python eval/eval_completion/visualize_generations.py /home/ubuntu/working_dir/eval/eval_completion/evals_results/humaneval-ns0/__home__ubuntu__working_dir__logs__Open_DLLM_SFT__checkpoints__global_step_150__hf_ckpt/samples_humaneval_2025-11-06T12-22-47.022778.jsonl \
- --index 0
+python eval/eval_completion/visualize_generations.py /home/ubuntu/working_dir/eval/eval_completion/evals_results/humaneval-ns0/__home__ubuntu__working_dir__logs__Open_DLLM_SFT__checkpoints__global_step_150__hf_ckpt/samples_humaneval_2025-11-18T18-36-23.983409.jsonl \
+ --index 21

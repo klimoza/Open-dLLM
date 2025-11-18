@@ -89,8 +89,8 @@ def visualize_sample(sample: Dict, index: int = None, show_all_responses: bool =
                     print()
             
             # Show full response
-            resp_formatted = format_code(resp)
-            print(f"  {resp_formatted}")
+            # resp_formatted = format_code(resp)
+            # print(f"  {resp_formatted}")
     
     # Target (test code)
     target = sample.get('target', '')

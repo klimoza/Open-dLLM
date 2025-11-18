@@ -100,10 +100,17 @@ def process_sft_example(
     prompt_tokens = tokenizer.encode(prompt_example, add_special_tokens=False)
     text_tokens = tokenizer.encode(text_example, add_special_tokens=False) + [tokenizer.eos_token_id]
     
+    marg = 256 - len(text_tokens)
     input_ids = (prompt_tokens + text_tokens)
     attention_mask = [1] * len(input_ids)
-    # labels = [IGNORE_INDEX] * len(prompt_tokens) + text_tokens
-    labels = input_ids
+    labels = [IGNORE_INDEX] * len(prompt_tokens) + text_tokens
+    # print(marg)
+    if marg > 0:
+        input_ids = input_ids + [tokenizer.pad_token_id] * marg
+        attention_mask = attention_mask + [1] * marg
+        labels = labels + [tokenizer.pad_token_id] * marg
+    # labels = input_ids.copy()
+    # labels[1] = IGNORE_INDEX
     examples = [
         {
             "input_ids": torch.tensor(input_ids),

@@ -31,7 +31,7 @@ if tokenizer.mask_token is None:
 
 # 3. Prepare generation config and inputs
 prompt = """
-Write a quick sort algorithm in Python.
+Write a function in Python which merges two sorted lists into a single sorted list.
 """
 
 input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
@@ -41,7 +41,7 @@ generation_config = MDMGenerationConfig(
     mask_token_id=tokenizer.mask_token_id,
     pad_token_id=tokenizer.pad_token_id, # Usually same as eos for decoder-only
     eos_token_id=tokenizer.eos_token_id,
-    max_new_tokens=128,
+    max_new_tokens=512,
     steps=128,
     temperature=0.5,
     top_k=200,
@@ -66,6 +66,7 @@ print("Generation complete.")
 # 5. Decode and print the output
 prompt_len = input_ids.shape[1]
 generated_sequences = outputs.sequences
+breakpoint()
 generated_text = tokenizer.decode(generated_sequences[0][prompt_len:], skip_special_tokens=True)
 
 print("\n--- Prompt ---")

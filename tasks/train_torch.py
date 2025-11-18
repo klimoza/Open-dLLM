@@ -263,7 +263,7 @@ def main():
             total_loss = 0
             torch.cuda.synchronize()
             start_time = time.time()
-            breakpoint()
+            # breakpoint()
             for micro_batch in micro_batches:
                 environ_meter.add(micro_batch)
 
@@ -272,13 +272,13 @@ def main():
                 }
                 with model_fwd_context:
                     loss: "torch.Tensor" = model(**micro_batch, use_cache=False).loss.mean() / len(micro_batches)
-                print(f"Loss value: {loss.item()}")
-                print(f"Loss requires_grad: {loss.requires_grad}")
-                print(f"Loss grad_fn: {loss.grad_fn}")
-                breakpoint()
+                # print(f"Loss value: {loss.item()}")
+                # print(f"Loss requires_grad: {loss.requires_grad}")
+                # print(f"Loss grad_fn: {loss.grad_fn}")
+                # breakpoint()
                 with model_bwd_context:
                     loss.backward()
-                breakpoint()
+                # breakpoint()
                 total_loss += loss.item()
                 del micro_batch
             
