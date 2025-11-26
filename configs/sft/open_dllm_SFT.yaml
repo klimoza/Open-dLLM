@@ -3,13 +3,13 @@ model:
   attn_implementation: flash_attention_2
 
 data:
-  train_path: ./openai_humaneval_first #./openai_humaneval/openai_humaneval #./open_code_instruct/data  # Updated to local path
-  train_size: 2450 # 1T tokens
+  train_path: ./opc-sft-stage2/educational_instruct #./openai_humaneval/openai_humaneval #./open_code_instruct/data  # Updated to local path
+  train_size: 30_000_000 # 1T tokens
   dataloader_type: native
   data_type: sft_data
-  max_seq_len: 245 # 4096
-  prompt_keys: prompt
-  text_keys: canonical_solution
+  max_seq_len: 768 # 4096
+  prompt_keys: instruction
+  text_keys: output
   drop_last: true
   datasets_type: iterable # mapping
   prefetch_factor: 2
@@ -19,21 +19,21 @@ train:
   output_dir: logs/Open_DLLM_SFT
   data_parallel_mode: ddp
   ulysses_parallel_size: 1
-  global_batch_size: 1 #512
-  micro_batch_size: 1 #16
+  global_batch_size: 512 #512
+  micro_batch_size: 16 #16
   rmpad: false
-  rmpad_with_pos_ids: true #true
+  rmpad_with_pos_ids: true
   enable_masking: true
   bsz_warmup_ratio: 0.00
   dyn_bsz_margin: 0
-  dyn_bsz_buffer_size: 128 #100
+  dyn_bsz_buffer_size: 100
   optimizer: adamw
   lr: 1.0e-4
-  lr_decay_style: constant #cosine
-  lr_warmup_ratio: 0.0 # 0.02 
+  lr_decay_style: cosine
+  lr_warmup_ratio: 0.02 
   lr_decay_ratio: 1.0  # Use full training for decay
   lr_min: 1e-6        # Minimum LR
-  num_train_epochs: 1000
+  num_train_epochs: 10
   weight_decay: 0.01
   max_grad_norm: 1.0
   enable_mixed_precision: false
@@ -46,8 +46,8 @@ train:
   empty_cache_steps: 1000
   ckpt_manager: bytecheckpoint
   load_checkpoint_path: ""
-  save_steps: 10000000
-  save_epochs: 500
+  save_steps: 100000000000
+  save_epochs: 1
   save_hf_weights: true
   wandb_project: Open_DLLM_SFT
   wandb_name: Open_DLLM_SFT-OpenAIHumanEval

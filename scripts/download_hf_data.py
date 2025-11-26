@@ -7,6 +7,11 @@ from huggingface_hub import snapshot_download
 python3 scripts/download_hf_data.py --repo_id HuggingFaceFW/fineweb --local_dir ./fineweb/ --allow_patterns sample/10BT/*
 python3 scripts/download_hf_data.py --repo_id nvidia/OpenCodeInstruct --local_dir ./open_code_instruct
 python3 scripts/download_hf_data.py --repo_id openai/openai_humaneval --local_dir ./openai_humaneval
+
+python3 scripts/download_hf_data.py \     
+  --repo_id OpenCoder-LLM/opc-sft-stage2 \
+  --local_dir ./opc-sft-stage2 \      
+  --allow_patterns "educational_instruct/*"
 """
 
 
