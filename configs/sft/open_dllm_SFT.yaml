@@ -3,11 +3,11 @@ model:
   attn_implementation: flash_attention_2
 
 data:
-  train_path: ./openai_humaneval/openai_humaneval #./open_code_instruct/data  # Updated to local path
-  train_size: 2048 # 1T tokens
+  train_path: ./openai_humaneval_first #./openai_humaneval/openai_humaneval #./open_code_instruct/data  # Updated to local path
+  train_size: 2450 # 1T tokens
   dataloader_type: native
   data_type: sft_data
-  max_seq_len: 100 # 4096
+  max_seq_len: 245 # 4096
   prompt_keys: prompt
   text_keys: canonical_solution
   drop_last: true
@@ -19,8 +19,8 @@ train:
   output_dir: logs/Open_DLLM_SFT
   data_parallel_mode: ddp
   ulysses_parallel_size: 1
-  global_batch_size: 128 #512
-  micro_batch_size: 64 #16
+  global_batch_size: 1 #512
+  micro_batch_size: 1 #16
   rmpad: false
   rmpad_with_pos_ids: true #true
   enable_masking: true
@@ -33,7 +33,7 @@ train:
   lr_warmup_ratio: 0.0 # 0.02 
   lr_decay_ratio: 1.0  # Use full training for decay
   lr_min: 1e-6        # Minimum LR
-  num_train_epochs: 1500
+  num_train_epochs: 1000
   weight_decay: 0.01
   max_grad_norm: 1.0
   enable_mixed_precision: false

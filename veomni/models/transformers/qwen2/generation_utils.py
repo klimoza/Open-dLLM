@@ -131,7 +131,6 @@ class MDMGenerationMixin:
         
         # 1. Prepare generation config
         generation_config = self._mdm_prepare_generation_config(generation_config, **kwargs)
-
         # 2. Prepare inputs
         input_ids = inputs
         attention_mask = kwargs.get("attention_mask", None)
@@ -141,7 +140,6 @@ class MDMGenerationMixin:
 
         if generation_config.max_new_tokens is not None:
             generation_config.max_length = input_ids.shape[-1] + generation_config.max_new_tokens
-        
         # 3. Expand inputs for multi-sequence generation
         input_ids, attention_mask = self._expand_inputs_for_generation(
             expand_size=generation_config.num_return_sequences,

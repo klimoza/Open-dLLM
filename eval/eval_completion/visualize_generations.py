@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 import argparse
+from transformers import AutoTokenizer
 
 
 def load_samples(jsonl_path: str) -> List[Dict]:
@@ -15,17 +16,10 @@ def load_samples(jsonl_path: str) -> List[Dict]:
     samples = []
     with open(jsonl_path, 'r', encoding='utf-8') as f:
         for line in f:
-            if line.strip():
-                samples.append(json.loads(line))
+            # if line.strip():
+            samples.append(json.loads(line))
     return samples
 
-
-def format_code(text: str) -> str:
-    """Format code with proper indentation, removing trailing whitespaces."""
-    lines = text.split('\n')
-    # Remove trailing whitespaces from each line
-    lines = [line.rstrip() for line in lines]
-    return '\n'.join(lines)
 
 
 def print_section(title: str, content: str, width: int = 100):
@@ -37,7 +31,15 @@ def print_section(title: str, content: str, width: int = 100):
     print("=" * width)
 
 
-def visualize_sample(sample: Dict, index: int = None, show_all_responses: bool = True):
+def count_tokens(text: str, tokenizer) -> int:
+    """Count tokens in text using the tokenizer."""
+    if not text:
+        return 0
+    tokens = tokenizer.encode(text, add_special_tokens=False)
+    return len(tokens)
+
+
+def visualize_sample(sample: Dict, index: int = None, show_all_responses: bool = True, tokenizer=None):
     """Visualize a single sample."""
     doc = sample['doc']
     task_id = doc.get('task_id', f'Task {sample.get("doc_id", index)}')
@@ -50,12 +52,18 @@ def visualize_sample(sample: Dict, index: int = None, show_all_responses: bool =
     
     # Prompt
     prompt = doc.get('prompt', '')
-    print_section("📝 PROMPT", format_code(prompt))
+    prompt_tokens = count_tokens(prompt, tokenizer) if tokenizer else None
+    print_section("📝 PROMPT", prompt)
+    if prompt_tokens is not None:
+        print(f"  📊 Tokens: {prompt_tokens}")
     
     # Canonical Solution
     canonical = doc.get('canonical_solution', '')
     if canonical:
-        print_section("✅ CANONICAL SOLUTION", format_code(canonical))
+        canonical_tokens = count_tokens(canonical, tokenizer) if tokenizer else None
+        print_section("✅ CANONICAL SOLUTION", canonical)
+        if canonical_tokens is not None:
+            print(f"  📊 Tokens: {canonical_tokens}")
     
     # Metrics
     pass_at_1 = sample.get('pass@1', 0.0)
@@ -78,24 +86,28 @@ def visualize_sample(sample: Dict, index: int = None, show_all_responses: bool =
         
         for i, resp in enumerate(responses_to_show):
             status = "✅" if pass_at_10 > 0 else "❌"
+            resp_tokens = count_tokens(resp, tokenizer) if tokenizer else None
             print(f"\n{status} Response {i+1}:")
+            if resp_tokens is not None:
+                print(f"  📊 Tokens: {resp_tokens}")
             print(f"{'─' * 98}")
             
-            # Show filtered response if available and different
-            if filtered_to_show and i < len(filtered_to_show):
-                filtered = filtered_to_show[i]
-                if filtered != resp and filtered.strip():
-                    print(f"  [FILTERED]: {format_code(filtered)}")
-                    print()
-            
             # Show full response
-            # resp_formatted = format_code(resp)
-            # print(f"  {resp_formatted}")
+            print(f"  {resp}")
+            
+            # Show filtered response if available and different
+            # if filtered_to_show and i < len(filtered_to_show):
+            #     filtered = filtered_to_show[i]
+            #     if filtered != resp and filtered.strip():
+                    # filtered_tokens = count_tokens(filtered, tokenizer) if tokenizer else None
+                    # print(f"\n  [FILTERED]: {format_code(filtered)}")
+                    # if filtered_tokens is not None:
+                    #     print(f"  📊 Filtered Tokens: {filtered_tokens}")
     
     # Target (test code)
     target = sample.get('target', '')
     if target:
-        print_section("🎯 TARGET (Test Code)", format_code(target))
+        print_section("🎯 TARGET (Test Code)", target)
 
 
 def print_summary(samples: List[Dict]):
@@ -156,6 +168,16 @@ def main():
     
     args = parser.parse_args()
     
+    # Load tokenizer
+    print("Loading tokenizer from HuggingFace (fredzzp/open-dcoder-0.5B)...", file=sys.stderr)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained("fredzzp/open-dcoder-0.5B")
+        print("Tokenizer loaded successfully.", file=sys.stderr)
+    except Exception as e:
+        print(f"Warning: Failed to load tokenizer: {e}", file=sys.stderr)
+        print("Continuing without token counting...", file=sys.stderr)
+        tokenizer = None
+    
     # Load samples
     jsonl_path = Path(args.jsonl_path)
     if not jsonl_path.exists():
@@ -171,7 +193,7 @@ def main():
     # Filter samples
     if args.index is not None:
         if 0 <= args.index < len(samples):
-            visualize_sample(samples[args.index], index=args.index, show_all_responses=args.show_all)
+            visualize_sample(samples[args.index], index=args.index, show_all_responses=args.show_all, tokenizer=tokenizer)
         else:
             print(f"Error: Index {args.index} out of range (0-{len(samples)-1})", file=sys.stderr)
             sys.exit(1)
@@ -179,7 +201,7 @@ def main():
         try:
             start, end = map(int, args.range.split(':'))
             for i in range(start, min(end, len(samples))):
-                visualize_sample(samples[i], index=i, show_all_responses=args.show_all)
+                visualize_sample(samples[i], index=i, show_all_responses=args.show_all, tokenizer=tokenizer)
         except ValueError:
             print("Error: Invalid range format. Use 'start:end' (e.g., '0:5')", file=sys.stderr)
             sys.exit(1)
@@ -188,7 +210,7 @@ def main():
         print_summary(samples)
         print("\n\nShowing first 5 samples:")
         for i in range(min(5, len(samples))):
-            visualize_sample(samples[i], index=i, show_all_responses=args.show_all)
+            visualize_sample(samples[i], index=i, show_all_responses=args.show_all, tokenizer=tokenizer)
         
         if len(samples) > 5:
             print(f"\n\n... ({len(samples) - 5} more samples not shown)")

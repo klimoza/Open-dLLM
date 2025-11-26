@@ -8,7 +8,8 @@ from veomni.models.transformers.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 from veomni.models.transformers.qwen2.generation_utils import MDMGenerationConfig
 
 # 1. Define paths and parameters
-model_path = "fredzzp/open-dcoder-0.5B" # "logs/Qwen2.5-Coder-0.5B_mdm/checkpoints/global_step_370000/hf_ckpt"
+# model_path = "fredzzp/open-dcoder-0.5B"
+model_path = "logs/Open_DLLM_SFT/checkpoints/global_step_1000/hf_ckpt"
 # You might need to use the original tokenizer path if it's not saved with the checkpoint
 tokenizer_path = model_path
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -30,9 +31,10 @@ if tokenizer.mask_token is None:
     print("Added new [MASK] token.")
 
 # 3. Prepare generation config and inputs
-prompt = """
-Write a function in Python which merges two sorted lists into a single sorted list.
-"""
+# prompt = """
+# Write a function in Python which merges two sorted lists into a single sorted list.
+# """
+prompt = "from typing import List\n\n\ndef has_close_elements(numbers: List[float], threshold: float) -> bool:\n    \"\"\" Check if in given list of numbers, are any two numbers closer to each other than\n    given threshold.\n    >>> has_close_elements([1.0, 2.0, 3.0], 0.5)\n    False\n    >>> has_close_elements([1.0, 2.8, 3.0, 4.0, 5.0, 2.0], 0.3)\n    True\n    \"\"\"\n"
 
 input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
 
@@ -41,11 +43,11 @@ generation_config = MDMGenerationConfig(
     mask_token_id=tokenizer.mask_token_id,
     pad_token_id=tokenizer.pad_token_id, # Usually same as eos for decoder-only
     eos_token_id=tokenizer.eos_token_id,
-    max_new_tokens=512,
+    max_new_tokens=128,
     steps=128,
-    temperature=0.5,
+    temperature=0.8,
     top_k=200,
-    alg='p2',
+    alg='origin',
     alg_temp=0.5,
     num_return_sequences=1,
     return_dict_in_generate=True,
@@ -66,7 +68,9 @@ print("Generation complete.")
 # 5. Decode and print the output
 prompt_len = input_ids.shape[1]
 generated_sequences = outputs.sequences
-breakpoint()
+# for i in range(128):
+    # breakpoint()
+    # print(tokenizer.decode(outputs['history'][i][0][prompt_len:], skip_special_tokens=False))
 generated_text = tokenizer.decode(generated_sequences[0][prompt_len:], skip_special_tokens=True)
 
 print("\n--- Prompt ---")
