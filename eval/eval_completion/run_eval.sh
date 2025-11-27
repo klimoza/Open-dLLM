@@ -9,7 +9,7 @@ ALG="p2"
 NUM_PROCESSES=8
 
 
-export CUDA_VISIBLE_DEVICES="0"
+export CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
 export HF_ALLOW_CODE_EVAL=1
 
 accelerate launch --num_processes $NUM_PROCESSES eval.py \
