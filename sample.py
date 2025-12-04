@@ -9,7 +9,7 @@ from veomni.models.transformers.qwen2.generation_utils import MDMGenerationConfi
 
 # 1. Define paths and parameters
 # model_path = "fredzzp/open-dcoder-0.5B"
-model_path = "logs/Open_DLLM_SFT/checkpoints/global_step_1000/hf_ckpt"
+model_path = "logs/Open_DLLM_SFT/checkpoints/global_step_1540/hf_ckpt"
 # You might need to use the original tokenizer path if it's not saved with the checkpoint
 tokenizer_path = model_path
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -34,7 +34,7 @@ if tokenizer.mask_token is None:
 # prompt = """
 # Write a function in Python which merges two sorted lists into a single sorted list.
 # """
-prompt = "from typing import List\n\n\ndef has_close_elements(numbers: List[float], threshold: float) -> bool:\n    \"\"\" Check if in given list of numbers, are any two numbers closer to each other than\n    given threshold.\n    >>> has_close_elements([1.0, 2.0, 3.0], 0.5)\n    False\n    >>> has_close_elements([1.0, 2.8, 3.0, 4.0, 5.0, 2.0], 0.3)\n    True\n    \"\"\"\n"
+prompt = "\ndef count_up_to(n):\n    \"\"\"Implement a function that takes an non-negative integer and returns an array of the first n\n    integers that are prime numbers and less than n.\n    for example:\n    count_up_to(5) => [2,3]\n    count_up_to(11) => [2,3,5,7]\n    count_up_to(0) => []\n    count_up_to(20) => [2,3,5,7,11,13,17,19]\n    count_up_to(1) => []\n    count_up_to(18) => [2,3,5,7,11,13,17]\n    \"\"\"\n"
 
 input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
 
@@ -47,9 +47,9 @@ generation_config = MDMGenerationConfig(
     steps=128,
     temperature=0.8,
     top_k=200,
-    alg='origin',
+    alg='p2',
     alg_temp=0.5,
-    num_return_sequences=1,
+    num_return_sequences=10,
     return_dict_in_generate=True,
     output_history=True
 )
@@ -71,9 +71,11 @@ generated_sequences = outputs.sequences
 # for i in range(128):
     # breakpoint()
     # print(tokenizer.decode(outputs['history'][i][0][prompt_len:], skip_special_tokens=False))
-generated_text = tokenizer.decode(generated_sequences[0][prompt_len:], skip_special_tokens=True)
-
+# breakpoint()
 print("\n--- Prompt ---")
 print(tokenizer.decode(input_ids[0], skip_special_tokens=True))
-print("\n--- Generated Code ---")
-print(generated_text)
+for i in range(10):
+    generated_text = tokenizer.decode(generated_sequences[i][prompt_len:], skip_special_tokens=False)
+
+    print("\n--- Generated Code ---")
+    print(generated_text)

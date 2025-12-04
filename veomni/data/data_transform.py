@@ -16,6 +16,7 @@
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Union
 from .constants import IGNORE_INDEX
 
+import random
 import torch
 
 
@@ -88,7 +89,8 @@ def process_sft_example(
         raise ValueError(f"prompt_keys must be a string or a list of strings, but got {type(prompt_keys)}")
 
     if isinstance(text_keys, str):
-        text_example = example[text_keys]
+        i = random.randint(0, len(example[text_keys]['solution']) - 1)
+        text_example = example[text_keys]['solution'][i]
     elif isinstance(text_keys, list):
         for key in text_keys:
             if key in example:
@@ -100,7 +102,9 @@ def process_sft_example(
     prompt_tokens = tokenizer.encode(prompt_example, add_special_tokens=False)
     text_tokens = tokenizer.encode(text_example, add_special_tokens=False) + [tokenizer.eos_token_id]
     
-    marg = torch.randint(0, 256, (1,)).item()
+    # marg = torch.randint(0, 256, (1,)).item()
+    # marg = 128 - len(text_tokens)
+    marg = 0
     input_ids = (prompt_tokens + text_tokens)
     attention_mask = [1] * len(input_ids)
     labels = [IGNORE_INDEX] * len(prompt_tokens) + text_tokens
