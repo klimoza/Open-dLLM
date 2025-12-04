@@ -33,7 +33,7 @@ train:
   lr_warmup_ratio: 0.02 
   lr_decay_ratio: 1.0  # Use full training for decay
   lr_min: 1e-6        # Minimum LR
-  num_train_epochs: 10
+  num_train_epochs: 20
   weight_decay: 0.01
   max_grad_norm: 1.0
   enable_mixed_precision: false

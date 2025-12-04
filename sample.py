@@ -69,8 +69,8 @@ print("Generation complete.")
 prompt_len = input_ids.shape[1]
 generated_sequences = outputs.sequences
 # for i in range(128):
-    # breakpoint()
-    # print(tokenizer.decode(outputs['history'][i][0][prompt_len:], skip_special_tokens=False))
+#     breakpoint()
+#     print(tokenizer.decode(outputs['history'][i][0][prompt_len:], skip_special_tokens=False))
 # breakpoint()
 print("\n--- Prompt ---")
 print(tokenizer.decode(input_ids[0], skip_special_tokens=True))

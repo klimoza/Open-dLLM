@@ -91,6 +91,7 @@ def process_sft_example(
     if isinstance(text_keys, str):
         i = random.randint(0, len(example[text_keys]['solution']) - 1)
         text_example = example[text_keys]['solution'][i]
+        # text_example = example[text_keys]
     elif isinstance(text_keys, list):
         for key in text_keys:
             if key in example:
@@ -103,8 +104,8 @@ def process_sft_example(
     text_tokens = tokenizer.encode(text_example, add_special_tokens=False) + [tokenizer.eos_token_id]
     
     # marg = torch.randint(0, 256, (1,)).item()
-    # marg = 128 - len(text_tokens)
-    marg = 0
+    marg = 128 - len(text_tokens)
+    # marg = 0
     input_ids = (prompt_tokens + text_tokens)
     attention_mask = [1] * len(input_ids)
     labels = [IGNORE_INDEX] * len(prompt_tokens) + text_tokens

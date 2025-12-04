@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Specify the global_step numbers you want to evaluate
-GLOBAL_STEPS=(156 312 468 624 780 936 1092 1248 1404 1560)
+GLOBAL_STEPS=(26 52 78 104 130)
 
 # Base path for the model checkpoints
 BASE_PATH="/home/ubuntu/working_dir/logs/Open_DLLM_SFT_code/checkpoints"
@@ -33,4 +33,5 @@ for step in "${GLOBAL_STEPS[@]}"; do
 done
 
 echo "All evaluations completed!"
+
 
