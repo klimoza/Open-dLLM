@@ -6,10 +6,11 @@ from transformers import AutoTokenizer
 from veomni.models.transformers.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 # Import the custom generation config
 from veomni.models.transformers.qwen2.generation_utils import MDMGenerationConfig
+from veomni.models.transformers.qwen2.generation_utils import RemaskingConfig
 
 # 1. Define paths and parameters
-# model_path = "fredzzp/open-dcoder-0.5B"
-model_path = "logs/Open_DLLM_SFT/checkpoints/global_step_1540/hf_ckpt"
+model_path = "fredzzp/open-dcoder-0.5B"
+# model_path = "logs/Open_DLLM_SFT/checkpoints/global_step_1540/hf_ckpt"
 # You might need to use the original tokenizer path if it's not saved with the checkpoint
 tokenizer_path = model_path
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -34,24 +35,34 @@ if tokenizer.mask_token is None:
 # prompt = """
 # Write a function in Python which merges two sorted lists into a single sorted list.
 # """
-prompt = "\ndef count_up_to(n):\n    \"\"\"Implement a function that takes an non-negative integer and returns an array of the first n\n    integers that are prime numbers and less than n.\n    for example:\n    count_up_to(5) => [2,3]\n    count_up_to(11) => [2,3,5,7]\n    count_up_to(0) => []\n    count_up_to(20) => [2,3,5,7,11,13,17,19]\n    count_up_to(1) => []\n    count_up_to(18) => [2,3,5,7,11,13,17]\n    \"\"\"\n"
+# prompt = "\ndef count_up_to(n):\n    \"\"\"Implement a function that takes an non-negative integer and returns an array of the first n\n    integers that are prime numbers and less than n.\n    for example:\n    count_up_to(5) => [2,3]\n    count_up_to(11) => [2,3,5,7]\n    count_up_to(0) => []\n    count_up_to(20) => [2,3,5,7,11,13,17,19]\n    count_up_to(1) => []\n    count_up_to(18) => [2,3,5,7,11,13,17]\n    \"\"\"\n"
+prompt = "def sum(a, b):\n    \"\"\"Return the sum of two numbers.\"\"\"\n"
 
 input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
+
+max_new_tokens = 64
+steps = 64
 
 # Create a generation configuration object
 generation_config = MDMGenerationConfig(
     mask_token_id=tokenizer.mask_token_id,
     pad_token_id=tokenizer.pad_token_id, # Usually same as eos for decoder-only
     eos_token_id=tokenizer.eos_token_id,
-    max_new_tokens=128,
-    steps=128,
+    max_new_tokens=max_new_tokens,
+    steps=steps,
     temperature=0.8,
     top_k=200,
-    alg='p2',
+    alg='remasking',
     alg_temp=0.5,
     num_return_sequences=10,
     return_dict_in_generate=True,
-    output_history=True
+    output_history=True,
+    remasking_config=RemaskingConfig(
+        schedule="linear",
+        remasking_t_on=0.5,
+        remasking_t_off=0.5,
+        remasking_alpha_on=0.9
+    )
 )
 
 # 4. Generate text using the diffusion_generate method
@@ -68,10 +79,13 @@ print("Generation complete.")
 # 5. Decode and print the output
 prompt_len = input_ids.shape[1]
 generated_sequences = outputs.sequences
-# for i in range(128):
-#     breakpoint()
-#     print(tokenizer.decode(outputs['history'][i][0][prompt_len:], skip_special_tokens=False))
-# breakpoint()
+for i in range(steps):
+    masks = ((outputs['history'][i][0]==tokenizer.mask_token_id).int().tolist())
+    masks = "".join(["M" if m else " " for m in masks])
+    print(masks)
+    # print()
+    # print("--------------------------------")
+    # print()
 print("\n--- Prompt ---")
 print(tokenizer.decode(input_ids[0], skip_special_tokens=True))
 for i in range(10):

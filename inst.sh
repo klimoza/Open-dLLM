@@ -12,8 +12,9 @@ pip install --upgrade --no-cache-dir \
   codetiming hydra-core pandas pyarrow>=15.0.0 pylatexenc \
   wandb ninja liger-kernel==0.5.8 \
   pytest yapf py-spy pyext pre-commit ruff packaging wheel
-pip install flash-attn
-# pip install "flash-attn==2.7.4.post1" \
-  # --extra-index-url https://github.com/Dao-AILab/flash-attention/releases/download
+# Build flash-attn from source to ensure ABI compatibility with the installed PyTorch version
+# Using --no-cache-dir to avoid cached pre-built wheels
+# Using --no-build-isolation to compile against the current PyTorch
+pip install flash-attn --no-cache-dir --no-build-isolation
 pip install -e .
 pip install -e lm-evaluation-harness human-eval-infilling

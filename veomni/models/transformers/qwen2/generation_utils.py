@@ -12,6 +12,8 @@ from transformers import __version__
 from transformers.generation.configuration_utils import GenerationConfig
 from transformers.utils import ModelOutput, is_torchdynamo_compiling, logging
 
+from .remasking_utils import compute_alpha, is_remasking_active, sample_indices_gumbel, get_remasking_logits
+
 logger = logging.get_logger(__name__)
 
 def top_p_logits(logits, top_p=None):
@@ -69,6 +71,23 @@ class MDMModelOutput(ModelOutput):
     sequences: torch.LongTensor = None
     history: Optional[Tuple[torch.FloatTensor]] = None
 
+
+class RemaskingConfig:
+    def __init__(self, **kwargs):
+        self.schedule = kwargs.pop("schedule", "loop")
+        # schedule: loop, linear
+        self.remasking_t_on = kwargs.pop("remasking_t_on", 0.55)
+        self.remasking_t_off = kwargs.pop("remasking_t_off", 0.05)
+        self.remasking_alpha_on = kwargs.pop("remasking_alpha_on", 0.9)
+        
+        self.remasking_logits_source = kwargs.pop("remasking_logits_source", "random")
+        # remasking_logits_source: random, model, confs
+        self.remasking_temperature = kwargs.pop("remasking_temperature", 1.0)
+
+        self.non_remasking_sampling_algorithm = kwargs.pop("non_remasking_sampling_algorithm", "origin")
+        # non_remasking_sampling_algorithm: origin, topk_margin, entropy, maskgit_plus
+
+
 class MDMGenerationConfig(GenerationConfig):
     def __init__(self, **kwargs):
         # Set do_sample=True as default for MDM (since MDM handles its own sampling)
@@ -86,6 +105,8 @@ class MDMGenerationConfig(GenerationConfig):
         self.output_history: bool = kwargs.pop("output_history", False)
         self.mask_token_id = kwargs.pop("mask_token_id", None)
         self.num_return_sequences = kwargs.pop("num_return_sequences", 1)
+
+        self.remasking_config = kwargs.pop("remasking_config", RemaskingConfig())
 
 
 class MDMGenerationMixin:
@@ -327,6 +348,127 @@ class MDMGenerationMixin:
                     # Batch update using advanced indexing
                     x[valid_batch_indices, valid_transfer_indices] = x_[valid_batch_indices, valid_transfer_indices]
             
+            elif alg == "remasking":
+                # Remasking algorithm with configurable alpha schedule
+                remasking_cfg = generation_config.remasking_config
+                
+                # Predict x_0 for all masked positions
+                confidence, x0 = sample_tokens(
+                    mask_logits, temperature=temperature, top_p=top_p, top_k=top_k, alg="origin"
+                )
+                
+                # Compute alpha (ratio of tokens to keep unmasked) based on schedule
+                alpha = compute_alpha(
+                    t=t.item(),
+                    schedule=remasking_cfg.schedule,
+                    t_on=remasking_cfg.remasking_t_on,
+                    t_off=remasking_cfg.remasking_t_off,
+                    alpha_on=remasking_cfg.remasking_alpha_on,
+                    eps=eps
+                )
+                
+                # Calculate number of completion tokens and how many to unmask
+                # Only consider completion tokens (those that were originally masked, i.e., ~fix_mask)
+                num_completion_tokens = (~fix_mask).sum(dim=1)  # [B]
+                num_to_unmask = (num_completion_tokens.float() * alpha).floor().long()  # [B]
+                num_to_unmask = num_to_unmask.clamp(min=0)
+                num_to_unmask = torch.minimum(num_to_unmask, num_completion_tokens)
+                
+                # Check if remasking is active at current timestep
+                remasking_active = is_remasking_active(
+                    t=t.item(),
+                    t_on=remasking_cfg.remasking_t_on,
+                    t_off=remasking_cfg.remasking_t_off
+                )
+                
+                if remasking_active:
+                    # Use Gumbel sampling to select which tokens to unmask
+                    # Candidates are completion positions only (~fix_mask)
+                    remasking_logits = get_remasking_logits(
+                        batch_size=x.size(0),
+                        seq_len=x.size(1),
+                        candidate_mask=~fix_mask,
+                        source=remasking_cfg.remasking_logits_source,
+                        device=x.device,
+                        dtype=logits.dtype
+                    )
+                    
+                    # Sample which positions to unmask using Gumbel trick
+                    unmask_selection = sample_indices_gumbel(remasking_logits, num_to_unmask)
+                    
+                    # Build the full x0 predictions
+                    x0_full = x.clone()
+                    x0_full[mask_index] = x0
+                    
+                    # Apply: unmask selected positions, mask everything else in completion
+                    # First, set all completion positions to mask
+                    x[~fix_mask] = mask_token_id
+                    # Then unmask the selected positions
+                    x[unmask_selection] = x0_full[unmask_selection]
+                else:
+                    # No remasking: use the non_remasking_sampling_algorithm
+                    non_remasking_alg = remasking_cfg.non_remasking_sampling_algorithm
+                    
+                    if non_remasking_alg == "origin":
+                        # Origin algorithm: probability-based transfer
+                        p_transfer = 1 - s / t if i < steps - 1 else 1
+                        x0_masked = torch.full_like(x[mask_index], fill_value=mask_token_id, device=self.device, dtype=torch.long)
+                        transfer_index_t_s = torch.rand(*x0_masked.shape, device=self.device) < p_transfer
+                        _, sampled_tokens = sample_tokens(mask_logits[transfer_index_t_s], temperature=temperature, top_p=top_p, top_k=top_k, alg="origin")
+                        x0_masked[transfer_index_t_s] = sampled_tokens
+                        x[mask_index] = x0_masked
+                    
+                    elif non_remasking_alg in ["maskgit_plus", "entropy", "topk_margin"]:
+                        # Confidence-based sampling
+                        confidence, x0_sampled = sample_tokens(mask_logits, temperature=temperature, top_p=top_p, top_k=top_k, alg=non_remasking_alg)
+                        confidence = confidence.to(mask_logits.dtype)
+                        
+                        # Calculate number of mask tokens per sample
+                        num_mask_tokens_per_sample = mask_index.sum(dim=1)  # [batch_size]
+                        
+                        # Calculate transfer tokens per sample
+                        if i < steps - 1:
+                            number_transfer_tokens_per_sample = (num_mask_tokens_per_sample.float() * (1 - s / t)).long()
+                        else:
+                            number_transfer_tokens_per_sample = num_mask_tokens_per_sample
+                        
+                        # Build full confidence matrix
+                        full_confidence = torch.full_like(x, -torch.inf, device=self.device, dtype=logits.dtype)
+                        full_confidence[mask_index] = confidence
+                        
+                        # Get maximum transfer tokens for efficient batching
+                        max_transfer_tokens = number_transfer_tokens_per_sample.max().item()
+                        
+                        if max_transfer_tokens > 0:
+                            if alg_temp is None or alg_temp == 0:
+                                # Use topk for each sample
+                                _, all_transfer_indices = torch.topk(full_confidence, max_transfer_tokens, dim=1)
+                            else:
+                                # Gumbel-TopK sampling
+                                scaled_logits = full_confidence / alg_temp
+                                uniform = torch.rand_like(scaled_logits).clamp_(min=1e-20, max=1 - 1e-20)
+                                gumbel_noise = -torch.log(-torch.log(uniform))
+                                scores = scaled_logits + gumbel_noise
+                                _, all_transfer_indices = torch.topk(scores, max_transfer_tokens, dim=1)
+                            
+                            # Create mask for valid transfers
+                            batch_size = x.size(0)
+                            valid_mask = torch.arange(max_transfer_tokens, device=x.device).unsqueeze(0) < number_transfer_tokens_per_sample.unsqueeze(1)
+                            
+                            # Get valid transfer indices
+                            valid_transfer_indices = all_transfer_indices[valid_mask]
+                            valid_batch_indices = torch.arange(batch_size, device=x.device).unsqueeze(1).expand_as(all_transfer_indices)[valid_mask]
+                            
+                            # Prepare transfer data
+                            x_ = torch.zeros_like(x, device=self.device, dtype=torch.long) + mask_token_id
+                            x_[mask_index] = x0_sampled.clone()
+                            
+                            # Apply transfer
+                            x[valid_batch_indices, valid_transfer_indices] = x_[valid_batch_indices, valid_transfer_indices]
+                    
+                    else:
+                        raise NotImplementedError(f"Non-remasking algorithm '{non_remasking_alg}' not implemented.")
+
             else:
                 raise NotImplementedError(f"Algorithm {alg} not implemented.")
 
