@@ -16,7 +16,8 @@ from veomni.models.transformers.qwen2.modeling_qwen2 import (
     Qwen2ForCausalLM
 )
 from veomni.models.transformers.qwen2.generation_utils import (
-    MDMGenerationConfig
+    MDMGenerationConfig,
+    RemaskingConfig
 )
 
 eval_logger = logging.getLogger("eval_logger")
@@ -38,6 +39,15 @@ class CustomCoder(LM):
         alg: Optional[str] = 'p2',
         alg_temp: Optional[float] = 0.5,
         trust_remote_code: Optional[bool] = True,
+        # Remasking parameters (only used when alg='remasking')
+        remasking_schedule: Optional[str] = "loop",
+        remasking_t_on: Optional[float] = 0.55,
+        remasking_t_off: Optional[float] = 0.05,
+        remasking_alpha_on: Optional[float] = 0.9,
+        remasking_logits_source: Optional[str] = "random",
+        remasking_temperature: Optional[float] = 1.0,
+        non_remasking_sampling_algorithm: Optional[str] = "origin",
+        remasker_checkpoint_path: Optional[str] = None,
         # Other lm-harness params
         max_length: Optional[int] = 2048,
         **kwargs,
@@ -61,6 +71,16 @@ class CustomCoder(LM):
         self.top_k = top_k
         self.alg = alg
         self.alg_temp = alg_temp
+
+        # Store remasking parameters
+        self.remasking_schedule = remasking_schedule
+        self.remasking_t_on = remasking_t_on
+        self.remasking_t_off = remasking_t_off
+        self.remasking_alpha_on = remasking_alpha_on
+        self.remasking_logits_source = remasking_logits_source
+        self.remasking_temperature = remasking_temperature
+        self.non_remasking_sampling_algorithm = non_remasking_sampling_algorithm
+        self.remasker_checkpoint_path = remasker_checkpoint_path
 
         # Load the custom model and tokenizer
         self._create_model_and_tokenizer(pretrained, dtype)
@@ -154,6 +174,20 @@ class CustomCoder(LM):
         # Note: do_sample is automatically set to True by MDMGenerationConfig
         num_return_sequences = gen_kwargs.get('num_return_sequences', 1)
 
+        # Create remasking config if using remasking algorithm
+        remasking_config = None
+        if self.alg == 'remasking':
+            remasking_config = RemaskingConfig(
+                schedule=self.remasking_schedule,
+                remasking_t_on=self.remasking_t_on,
+                remasking_t_off=self.remasking_t_off,
+                remasking_alpha_on=self.remasking_alpha_on,
+                remasking_logits_source=self.remasking_logits_source,
+                remasking_temperature=self.remasking_temperature,
+                non_remasking_sampling_algorithm=self.non_remasking_sampling_algorithm,
+                remasker_checkpoint_path=self.remasker_checkpoint_path,
+            )
+
         # Create a generation configuration object
         generation_config = MDMGenerationConfig(
             mask_token_id=self.tokenizer.mask_token_id,
@@ -166,6 +200,8 @@ class CustomCoder(LM):
             top_k=self.top_k,
             alg=self.alg,
             alg_temp=self.alg_temp,
+            # Remasking config (None if not using remasking)
+            remasking_config=remasking_config,
             # Parameters from yaml - override model_args
             num_return_sequences=num_return_sequences,
             return_dict_in_generate=True,

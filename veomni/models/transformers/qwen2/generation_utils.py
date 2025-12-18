@@ -12,7 +12,7 @@ from transformers import __version__
 from transformers.generation.configuration_utils import GenerationConfig
 from transformers.utils import ModelOutput, is_torchdynamo_compiling, logging
 
-from .remasking_utils import compute_alpha, is_remasking_active, sample_indices_gumbel, get_remasking_logits
+from .remasking_utils import compute_alpha, is_remasking_active, sample_indices_gumbel, get_remasking_logits, load_remasker_model
 
 logger = logging.get_logger(__name__)
 
@@ -86,6 +86,11 @@ class RemaskingConfig:
 
         self.non_remasking_sampling_algorithm = kwargs.pop("non_remasking_sampling_algorithm", "origin")
         # non_remasking_sampling_algorithm: origin, topk_margin, entropy, maskgit_plus
+        
+        # Remasker model checkpoint path (for remasking_logits_source="model")
+        self.remasker_checkpoint_path = kwargs.pop("remasker_checkpoint_path", None)
+        # Cached remasker model instance (loaded lazily)
+        self._remasker_model = None
 
 
 class MDMGenerationConfig(GenerationConfig):
@@ -225,8 +230,19 @@ class MDMGenerationMixin:
                 break
 
             # is_causal=False is crucial for bidirectional attention
-            outputs = self(input_ids=x, attention_mask=gen_attention_mask, is_causal=False)
+            # Output hidden states when using remasking with model source
+            need_hidden_states = (
+                alg == "remasking" and 
+                generation_config.remasking_config.remasking_logits_source == "model"
+            )
+            outputs = self(
+                input_ids=x, 
+                attention_mask=gen_attention_mask, 
+                is_causal=False,
+                output_hidden_states=need_hidden_states,
+            )
             logits = outputs.logits
+            hidden_states = outputs.hidden_states[-1] if need_hidden_states else None
 
             # CRITICAL: Shift logits to predict the next token, aligning with training
             logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)
@@ -357,6 +373,26 @@ class MDMGenerationMixin:
                     mask_logits, temperature=temperature, top_p=top_p, top_k=top_k, alg="origin"
                 )
                 
+                # Build the full x0 predictions early (needed for model-based remasking)
+                x0_full = x.clone()
+                x0_full[mask_index] = x0
+                
+                # Load remasker model if using model-based remasking (lazy loading)
+                remasker_model = None
+                if remasking_cfg.remasking_logits_source == "model":
+                    if remasking_cfg._remasker_model is None:
+                        if remasking_cfg.remasker_checkpoint_path is None:
+                            raise ValueError(
+                                "remasker_checkpoint_path must be set in remasking_config when "
+                                "remasking_logits_source='model'"
+                            )
+                        remasking_cfg._remasker_model = load_remasker_model(
+                            remasking_cfg.remasker_checkpoint_path,
+                            device=str(self.device),
+                        )
+                        remasking_cfg._remasker_model.to(self.device)
+                    remasker_model = remasking_cfg._remasker_model
+                
                 # Compute alpha (ratio of tokens to keep unmasked) based on schedule
                 alpha = compute_alpha(
                     t=t.item(),
@@ -390,15 +426,16 @@ class MDMGenerationMixin:
                         candidate_mask=~fix_mask,
                         source=remasking_cfg.remasking_logits_source,
                         device=x.device,
-                        dtype=logits.dtype
+                        dtype=logits.dtype,
+                        # Additional parameters for model-based remasking
+                        x_0=x0_full,
+                        hidden_states=hidden_states,
+                        remasker_model=remasker_model,
+                        attention_mask=gen_attention_mask.float() if gen_attention_mask is not None else None,
                     )
                     
                     # Sample which positions to unmask using Gumbel trick
                     unmask_selection = sample_indices_gumbel(remasking_logits, num_to_unmask)
-                    
-                    # Build the full x0 predictions
-                    x0_full = x.clone()
-                    x0_full[mask_index] = x0
                     
                     # Apply: unmask selected positions, mask everything else in completion
                     # First, set all completion positions to mask
@@ -409,9 +446,30 @@ class MDMGenerationMixin:
                     # No remasking: use the non_remasking_sampling_algorithm
                     non_remasking_alg = remasking_cfg.non_remasking_sampling_algorithm
                     
+                    # Compute alpha at next step s for calculating transfer ratio
+                    alpha_s = compute_alpha(
+                        t=s.item(),
+                        schedule=remasking_cfg.schedule,
+                        t_on=remasking_cfg.remasking_t_on,
+                        t_off=remasking_cfg.remasking_t_off,
+                        alpha_on=remasking_cfg.remasking_alpha_on,
+                        eps=eps
+                    )
+                    
+                    # Calculate transfer ratio based on alpha
+                    # alpha is alpha_t (computed earlier), alpha_s is alpha at next step
+                    # transfer_ratio = (alpha_s - alpha_t) / (1 - alpha_t)
+                    if i < steps - 1:
+                        if alpha < 1.0:
+                            transfer_ratio = (alpha_s - alpha) / (1.0 - alpha)
+                        else:
+                            transfer_ratio = 1.0
+                    else:
+                        transfer_ratio = 1.0
+                    
                     if non_remasking_alg == "origin":
                         # Origin algorithm: probability-based transfer
-                        p_transfer = 1 - s / t if i < steps - 1 else 1
+                        p_transfer = transfer_ratio
                         x0_masked = torch.full_like(x[mask_index], fill_value=mask_token_id, device=self.device, dtype=torch.long)
                         transfer_index_t_s = torch.rand(*x0_masked.shape, device=self.device) < p_transfer
                         _, sampled_tokens = sample_tokens(mask_logits[transfer_index_t_s], temperature=temperature, top_p=top_p, top_k=top_k, alg="origin")
@@ -426,11 +484,8 @@ class MDMGenerationMixin:
                         # Calculate number of mask tokens per sample
                         num_mask_tokens_per_sample = mask_index.sum(dim=1)  # [batch_size]
                         
-                        # Calculate transfer tokens per sample
-                        if i < steps - 1:
-                            number_transfer_tokens_per_sample = (num_mask_tokens_per_sample.float() * (1 - s / t)).long()
-                        else:
-                            number_transfer_tokens_per_sample = num_mask_tokens_per_sample
+                        # Calculate transfer tokens per sample using alpha-based transfer ratio
+                        number_transfer_tokens_per_sample = (num_mask_tokens_per_sample.float() * transfer_ratio).long()
                         
                         # Build full confidence matrix
                         full_confidence = torch.full_like(x, -torch.inf, device=self.device, dtype=logits.dtype)

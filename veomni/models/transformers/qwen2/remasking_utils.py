@@ -123,13 +123,35 @@ def sample_indices_gumbel(logits: torch.Tensor, num_to_select: torch.Tensor) -> 
     return selected_mask
 
 
+def load_remasker_model(checkpoint_path: str, device: str = "cpu"):
+    """
+    Load a trained remasker model from checkpoint.
+    
+    Args:
+        checkpoint_path: Path to the remasker checkpoint directory
+        device: Device to load model on
+    
+    Returns:
+        Loaded Remasker model
+    """
+    from .remasker_model import Remasker
+    model = Remasker.from_pretrained(checkpoint_path, device=device)
+    model.eval()
+    return model
+
+
 def get_remasking_logits(
     batch_size: int,
     seq_len: int,
     candidate_mask: torch.Tensor,
     source: str = "random",
     device: torch.device = None,
-    dtype: torch.dtype = torch.float32
+    dtype: torch.dtype = torch.float32,
+    # Additional parameters for model-based remasking
+    x_0: torch.Tensor = None,
+    hidden_states: torch.Tensor = None,
+    remasker_model = None,
+    attention_mask: torch.Tensor = None,
 ) -> torch.Tensor:
     """
     Generate logits for remasking selection.
@@ -139,19 +161,52 @@ def get_remasking_logits(
         seq_len: Sequence length
         candidate_mask: Boolean tensor [B, L] indicating which positions are candidates
                        (True = can be selected for unmasking)
-        source: Source of logits. Currently only "random" is supported.
+        source: Source of logits. Options:
+                - "random": uniform random logits
+                - "model": use trained remasker model
         device: Device to create tensor on
         dtype: Data type for the logits tensor
+        x_0: Predicted token ids [B, L] (required for source="model")
+        hidden_states: Hidden states from backbone [B, L, D] (required for source="model")
+        remasker_model: Trained Remasker model instance (required for source="model")
+        attention_mask: Optional attention mask [B, L]
     
     Returns:
         logits: Tensor of shape [B, L] with logits for selection.
+                Higher logits = more likely to be correct = more likely to be kept unmasked.
                 Non-candidate positions have -inf to exclude them.
     """
     if source == "random":
         # Random logits (uniform distribution for Gumbel sampling)
         logits = torch.zeros(batch_size, seq_len, device=device, dtype=dtype)
+    
+    elif source == "model":
+        # Use trained remasker model to predict correctness
+        if remasker_model is None:
+            raise ValueError("remasker_model must be provided when source='model'")
+        if x_0 is None:
+            raise ValueError("x_0 must be provided when source='model'")
+        if hidden_states is None:
+            raise ValueError("hidden_states must be provided when source='model'")
+        
+        # Run remasker model
+        with torch.no_grad():
+            logits = remasker_model(
+                x_0=x_0,
+                hidden_states=hidden_states,
+                attention_mask=attention_mask,
+            )
+        
+        # Ensure correct dtype
+        logits = logits.to(dtype)
+    
+    elif source == "confs":
+        # Use model confidence scores (to be implemented)
+        # This would use the confidence from sample_tokens
+        raise NotImplementedError("Remasking logits source 'confs' not yet implemented.")
+    
     else:
-        raise NotImplementedError(f"Remasking logits source '{source}' not implemented. Use 'random'.")
+        raise NotImplementedError(f"Remasking logits source '{source}' not implemented. Use 'random' or 'model'.")
     
     # Mask out non-candidate positions with -inf
     logits = logits.masked_fill(~candidate_mask, float('-inf'))
