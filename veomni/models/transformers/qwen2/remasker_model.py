@@ -312,5 +312,11 @@ class Remasker(nn.Module):
             except Exception as e:
                 print(f"Warning: Could not copy norm: {e}")
         
+        # Initialize classifier with zeros (new layer, start neutral)
+        nn.init.zeros_(model.classifier.weight)
+        if model.classifier.bias is not None:
+            nn.init.zeros_(model.classifier.bias)
+        print(f"Initialized classifier with zeros")
+        
         return model
 

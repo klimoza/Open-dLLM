@@ -35,8 +35,8 @@ if tokenizer.mask_token is None:
 # prompt = """
 # Write a function in Python which merges two sorted lists into a single sorted list.
 # """
-prompt = "\ndef count_up_to(n):\n    \"\"\"Implement a function that takes an non-negative integer and returns an array of the first n\n    integers that are prime numbers and less than n.\n    for example:\n    count_up_to(5) => [2,3]\n    count_up_to(11) => [2,3,5,7]\n    count_up_to(0) => []\n    count_up_to(20) => [2,3,5,7,11,13,17,19]\n    count_up_to(1) => []\n    count_up_to(18) => [2,3,5,7,11,13,17]\n    \"\"\"\n"
-# prompt = "def sum(a, b):\n    \"\"\"Return the sum of two numbers.\"\"\"\n"
+# prompt = "\ndef count_up_to(n):\n    \"\"\"Implement a function that takes an non-negative integer and returns an array of the first n\n    integers that are prime numbers and less than n.\n    for example:\n    count_up_to(5) => [2,3]\n    count_up_to(11) => [2,3,5,7]\n    count_up_to(0) => []\n    count_up_to(20) => [2,3,5,7,11,13,17,19]\n    count_up_to(1) => []\n    count_up_to(18) => [2,3,5,7,11,13,17]\n    \"\"\"\n"
+prompt = "def sum(a, b):\n    \"\"\"Return the sum of two numbers.\"\"\"\n"
 
 input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
 
@@ -59,11 +59,11 @@ generation_config = MDMGenerationConfig(
     output_history=True,
     remasking_config=RemaskingConfig(
         schedule="loop",
-        remasking_t_on=0.55,
+        remasking_t_on=0.4,
         remasking_t_off=0.2,
         remasking_alpha_on=0.9,
         remasking_logits_source="model",
-        remasker_checkpoint_path="/home/shibaev/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-lr-1e-5-bs8-grad-acc32-random-0.05-repeat-0.05-label-smoothing-0.05/step_12000",
+        remasker_checkpoint_path="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_random-denoising-t0.2-t0.1-temp0.0/step_15000",
         non_remasking_sampling_algorithm="entropy",
         remasking_temperature=0.001,
     )

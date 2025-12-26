@@ -50,6 +50,8 @@ except ImportError:
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+from veomni.models.transformers.qwen2.remasking_utils import compute_alpha
+
 
 @dataclass
 class RemaskerTrainingConfig:
@@ -103,6 +105,12 @@ class RemaskerTrainingConfig:
     
     # Label smoothing
     label_smoothing_alpha: float = 0.0  # If > 0, use soft labels: 0 -> alpha, 1 -> 1-alpha
+    
+    # Denoising training mode
+    use_denoising_training: bool = False  # If True, use denoising-based training that matches inference
+    denoising_t_on: float = 0.1  # Upper bound for timestep sampling
+    denoising_t_off: float = 0.1  # Lower bound for timestep sampling
+    denoising_temperature: float = 0.0  # Temperature for sampling x_0 from logits (0 = greedy)
     
     # Other
     seed: int = 42
@@ -198,6 +206,95 @@ def corrupt_completion(
     return corrupted_ids, corruption_mask
 
 
+def create_masked_sequence(
+    prompt_ids: torch.Tensor,
+    completion_ids: torch.Tensor,
+    mask_token_id: int,
+    t: float,
+    t_on: float = 0.55,
+    t_off: float = 0.05,
+    alpha_on: float = 0.9,
+    schedule: str = "linear",
+    eps: float = 1e-3,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Create a masked sequence x_t by masking (1-alpha) fraction of completion tokens.
+    
+    This simulates the denoising process at timestep t, where alpha(t) determines
+    how many tokens are unmasked/revealed.
+    
+    Args:
+        prompt_ids: Token ids of the prompt [P]
+        completion_ids: Token ids of the completion (ground truth) [C]
+        mask_token_id: The mask token id to use for masked positions
+        t: Timestep value (typically sampled from [t_off, t_on])
+        t_on: Upper bound of remasking interval
+        t_off: Lower bound of remasking interval
+        alpha_on: Alpha value during plateau phase (for loop schedule)
+        schedule: Either "loop" or "linear"
+        eps: Small value representing final timestep
+    
+    Returns:
+        x_t: Masked sequence [P + C] with some completion tokens replaced by mask_token_id
+        mask_positions: Boolean mask [P + C], True where completion tokens are masked
+    """
+    device = completion_ids.device
+    prompt_len = prompt_ids.shape[0]
+    completion_len = completion_ids.shape[0]
+    
+    # Compute alpha (fraction of tokens to keep unmasked)
+    alpha = compute_alpha(
+        t=t,
+        schedule=schedule,
+        t_on=t_on,
+        t_off=t_off,
+        alpha_on=alpha_on,
+        eps=eps
+    )
+    
+    # Number of completion tokens to keep unmasked
+    num_to_keep = int(completion_len * alpha)
+    num_to_mask = completion_len - num_to_keep
+    
+    # Randomly select which positions to mask in completion
+    perm = torch.randperm(completion_len, device=device)
+    mask_indices = perm[:num_to_mask]  # Indices within completion to mask
+    
+    # Create masked completion
+    masked_completion = completion_ids.clone()
+    masked_completion[mask_indices] = mask_token_id
+    
+    # Combine prompt + masked completion
+    x_t = torch.cat([prompt_ids, masked_completion])
+    
+    # Create mask indicating which positions are masked (in full sequence)
+    mask_positions = torch.zeros(prompt_len + completion_len, dtype=torch.bool, device=device)
+    mask_positions[prompt_len + mask_indices] = True
+    
+    return x_t, mask_positions
+
+
+def sample_tokens_from_logits(
+    logits: torch.Tensor,
+    temperature: float = 0.0,
+) -> torch.Tensor:
+    """
+    Sample tokens from logits.
+    
+    Args:
+        logits: Logits tensor [*, vocab_size]
+        temperature: Sampling temperature (0 = greedy)
+    
+    Returns:
+        Sampled token ids [*]
+    """
+    if temperature > 0:
+        probs = torch.softmax(logits / temperature, dim=-1)
+        return torch.multinomial(probs.view(-1, probs.shape[-1]), num_samples=1).view(probs.shape[:-1])
+    else:
+        return logits.argmax(dim=-1)
+
+
 class RemaskerDataset(Dataset):
     """Dataset for training the remasker."""
     
@@ -208,6 +305,7 @@ class RemaskerDataset(Dataset):
         backbone_model,
         config: RemaskerTrainingConfig,
         is_eval: bool = False,
+        mask_token_id: Optional[int] = None,
     ):
         self.data = data
         self.tokenizer = tokenizer
@@ -215,6 +313,7 @@ class RemaskerDataset(Dataset):
         self.config = config
         self.is_eval = is_eval
         self.vocab_size = tokenizer.vocab_size
+        self.mask_token_id = mask_token_id  # For denoising training mode
         
         # Get special token ids to exclude from corruption
         self.special_token_ids = []
@@ -280,34 +379,55 @@ class RemaskerDataset(Dataset):
         prompt_ids = torch.tensor(prompt_tokens, dtype=torch.long)
         completion_ids = torch.tensor(completion_tokens, dtype=torch.long)
         
-        # Corrupt completion
-        corrupted_completion, corruption_mask = corrupt_completion(
-            completion_ids,
-            self.vocab_size,
-            self.config.random_corruption_ratio,
-            self.config.repeat_corruption_ratio,
-            self.special_token_ids,
-        )
-        
-        # Combine prompt + corrupted completion
-        full_ids = torch.cat([prompt_ids, corrupted_completion])
-        
-        # Create labels (1 = correct, 0 = corrupted)
-        # Prompt tokens are always "correct" (we don't predict on them)
-        prompt_labels = torch.ones(len(prompt_tokens), dtype=torch.float)
-        completion_labels = (~corruption_mask).float()  # 1 if not corrupted
-        full_labels = torch.cat([prompt_labels, completion_labels])
-        
-        # Create mask for which positions to compute loss on (only completion)
-        loss_mask = torch.zeros(len(full_ids), dtype=torch.bool)
-        loss_mask[len(prompt_tokens):] = True
-        
-        return {
-            "input_ids": full_ids,
-            "labels": full_labels,
-            "loss_mask": loss_mask,
-            "prompt_len": len(prompt_tokens),
-        }
+        if self.config.use_denoising_training:
+            # Denoising mode: return ground truth tokens
+            # Masking, denoising, and augmentation will be done in train_epoch
+            full_ids = torch.cat([prompt_ids, completion_ids])
+            
+            # Ground truth labels (all correct for now, will be recomputed after augmentation)
+            full_labels = torch.ones(len(full_ids), dtype=torch.float)
+            
+            # Create mask for which positions to compute loss on (only completion)
+            loss_mask = torch.zeros(len(full_ids), dtype=torch.bool)
+            loss_mask[len(prompt_tokens):] = True
+            
+            return {
+                "input_ids": full_ids,  # Ground truth sequence
+                "labels": full_labels,  # Will be recomputed after denoising + augmentation
+                "loss_mask": loss_mask,
+                "prompt_len": len(prompt_tokens),
+                "ground_truth_ids": full_ids.clone(),  # Keep a copy for label computation
+            }
+        else:
+            # Original corruption-based training mode
+            # Corrupt completion
+            corrupted_completion, corruption_mask = corrupt_completion(
+                completion_ids,
+                self.vocab_size,
+                self.config.random_corruption_ratio,
+                self.config.repeat_corruption_ratio,
+                self.special_token_ids,
+            )
+            
+            # Combine prompt + corrupted completion
+            full_ids = torch.cat([prompt_ids, corrupted_completion])
+            
+            # Create labels (1 = correct, 0 = corrupted)
+            # Prompt tokens are always "correct" (we don't predict on them)
+            prompt_labels = torch.ones(len(prompt_tokens), dtype=torch.float)
+            completion_labels = (~corruption_mask).float()  # 1 if not corrupted
+            full_labels = torch.cat([prompt_labels, completion_labels])
+            
+            # Create mask for which positions to compute loss on (only completion)
+            loss_mask = torch.zeros(len(full_ids), dtype=torch.bool)
+            loss_mask[len(prompt_tokens):] = True
+            
+            return {
+                "input_ids": full_ids,
+                "labels": full_labels,
+                "loss_mask": loss_mask,
+                "prompt_len": len(prompt_tokens),
+            }
 
 
 def collate_fn(batch: List[Dict[str, torch.Tensor]], pad_token_id: int) -> Dict[str, torch.Tensor]:
@@ -319,6 +439,8 @@ def collate_fn(batch: List[Dict[str, torch.Tensor]], pad_token_id: int) -> Dict[
     loss_masks = []
     attention_masks = []
     prompt_lens = []
+    ground_truth_ids = []
+    has_ground_truth = "ground_truth_ids" in batch[0]
     
     for item in batch:
         seq_len = item["input_ids"].shape[0]
@@ -329,6 +451,9 @@ def collate_fn(batch: List[Dict[str, torch.Tensor]], pad_token_id: int) -> Dict[
         labels.append(F.pad(item["labels"], (0, pad_len), value=1.0))  # Pad labels with 1 (correct)
         loss_masks.append(F.pad(item["loss_mask"], (0, pad_len), value=False))
         
+        if has_ground_truth:
+            ground_truth_ids.append(F.pad(item["ground_truth_ids"], (0, pad_len), value=pad_token_id))
+        
         # Create attention mask
         attn_mask = torch.zeros(max_len, dtype=torch.bool)
         attn_mask[:seq_len] = True
@@ -336,13 +461,18 @@ def collate_fn(batch: List[Dict[str, torch.Tensor]], pad_token_id: int) -> Dict[
         
         prompt_lens.append(item["prompt_len"])
     
-    return {
+    result = {
         "input_ids": torch.stack(input_ids),
         "labels": torch.stack(labels),
         "loss_mask": torch.stack(loss_masks),
         "attention_mask": torch.stack(attention_masks),
         "prompt_lens": torch.tensor(prompt_lens),
     }
+    
+    if has_ground_truth:
+        result["ground_truth_ids"] = torch.stack(ground_truth_ids)
+    
+    return result
 
 
 def load_data(config: RemaskerTrainingConfig) -> tuple[List[Dict], List[Dict]]:
@@ -441,6 +571,8 @@ def train_epoch(
     epoch: int,
     global_step: int,
     save_path: str,
+    mask_token_id: Optional[int] = None,
+    tokenizer = None,
 ) -> tuple[float, int]:
     """Train for one epoch."""
     model.train()
@@ -454,6 +586,16 @@ def train_epoch(
     accum_grad_norm = 0.0
     accum_count = 0
     
+    # Get special token ids for corruption (denoising mode)
+    special_token_ids = []
+    if tokenizer is not None:
+        if tokenizer.pad_token_id is not None:
+            special_token_ids.append(tokenizer.pad_token_id)
+        if tokenizer.eos_token_id is not None:
+            special_token_ids.append(tokenizer.eos_token_id)
+        if tokenizer.bos_token_id is not None:
+            special_token_ids.append(tokenizer.bos_token_id)
+    
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}", dynamic_ncols=True)
     optimizer.zero_grad()
     
@@ -462,64 +604,207 @@ def train_epoch(
         labels = batch["labels"].to(config.device)
         loss_mask = batch["loss_mask"].to(config.device)
         attention_mask = batch["attention_mask"].to(config.device)
+        prompt_lens = batch["prompt_lens"].to(config.device)
         
-        # Get hidden states from backbone (no gradient)
-        with torch.no_grad():
-            with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
-                backbone_outputs = backbone(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    output_hidden_states=True,
-                    return_dict=True,
-                )
-                hidden_states = backbone_outputs.hidden_states[-1]  # Final layer
-        
-        # Forward pass through remasker
-        with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
-            logits = model(
-                x_0=input_ids,
-                hidden_states=hidden_states,
-                attention_mask=attention_mask.float(),
+        if config.use_denoising_training:
+            # Denoising training mode: simulate inference process
+            ground_truth_ids = batch["ground_truth_ids"].to(config.device)
+            batch_size, seq_len = input_ids.shape
+            
+            # Sample timestep t uniformly from [t_off, t_on]
+            t = random.uniform(config.denoising_t_off, config.denoising_t_on)
+            
+            # Compute alpha (fraction of tokens to keep unmasked)
+            alpha = compute_alpha(
+                t=t,
+                schedule="linear",
+                t_on=config.denoising_t_on,
+                t_off=config.denoising_t_off,
+                alpha_on=0.9,  # Not used for linear schedule
+                eps=1e-3
             )
             
-            # Get masked logits and labels
-            masked_logits = logits[loss_mask]
-            masked_labels = labels[loss_mask]
+            # Create x_t by masking completion tokens for each sample in batch
+            x_t = ground_truth_ids.clone()
+            mask_positions = torch.zeros_like(x_t, dtype=torch.bool)
             
-            # Apply label smoothing if enabled: 0 -> alpha, 1 -> 1-alpha
-            if config.label_smoothing_alpha > 0:
-                masked_labels = masked_labels * (1 - 2 * config.label_smoothing_alpha) + config.label_smoothing_alpha
-            
-            # Compute class weights if enabled
-            if config.use_class_reweighting and masked_labels.numel() > 0:
-                # Count positive (correct) and negative (corrupted) samples
-                num_positive = masked_labels.sum()
-                num_negative = masked_labels.numel() - num_positive
+            for b in range(batch_size):
+                prompt_len = prompt_lens[b].item()
+                completion_len = (attention_mask[b].sum().item()) - prompt_len
+                if completion_len <= 0:
+                    continue
                 
-                # pos_weight: weight for positive class to balance with negative class
-                # If positive is majority, pos_weight < 1 to down-weight positives
-                # This is equivalent to up-weighting negatives
-                if num_positive > 0 and num_negative > 0:
-                    pos_weight = num_negative / num_positive
+                # Number of completion tokens to mask
+                num_to_mask = int(completion_len * (1 - alpha))
+                if num_to_mask > 0:
+                    # Randomly select which positions to mask in completion
+                    perm = torch.randperm(completion_len, device=config.device)
+                    mask_indices = perm[:num_to_mask]
+                    
+                    # Apply masking
+                    x_t[b, prompt_len + mask_indices] = mask_token_id
+                    mask_positions[b, prompt_len + mask_indices] = True
+            
+            # Get hidden states and logits from backbone on x_t
+            with torch.no_grad():
+                with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
+                    backbone_outputs = backbone(
+                        input_ids=x_t,
+                        attention_mask=attention_mask,
+                        output_hidden_states=True,
+                        return_dict=True,
+                        is_causal=False,  # Bidirectional attention for MDM
+                    )
+                    hidden_states = backbone_outputs.hidden_states[-1]
+                    backbone_logits = backbone_outputs.logits
+                    
+                    # CRITICAL: Shift logits to predict the next token (matching inference)
+                    backbone_logits = torch.cat([backbone_logits[:, :1], backbone_logits[:, :-1]], dim=1)
+                    
+                    # Sample x_0 predictions from logits
+                    x_0_pred = sample_tokens_from_logits(
+                        backbone_logits, 
+                        temperature=config.denoising_temperature
+                    )
+                    
+                    # Build x_0_full: use predictions for masked positions, ground truth for unmasked
+                    x_0_full = ground_truth_ids.clone()
+                    x_0_full[mask_positions] = x_0_pred[mask_positions]
+                    
+                    # Apply augmentations (random/repeat corruption) to completion tokens
+                    # We need to do this per-sample since completion lengths vary
+                    augmentation_mask = torch.zeros_like(x_0_full, dtype=torch.bool)
+                    
+                    for b in range(batch_size):
+                        prompt_len = prompt_lens[b].item()
+                        actual_len = attention_mask[b].sum().item()
+                        completion_len = actual_len - prompt_len
+                        if completion_len <= 0:
+                            continue
+                        
+                        completion_slice = x_0_full[b, prompt_len:actual_len]
+                        corrupted_completion, corruption_mask = corrupt_completion(
+                            completion_slice,
+                            vocab_size=tokenizer.vocab_size if tokenizer else backbone.config.vocab_size,
+                            random_ratio=config.random_corruption_ratio,
+                            repeat_ratio=config.repeat_corruption_ratio,
+                            special_token_ids=special_token_ids,
+                        )
+                        x_0_full[b, prompt_len:actual_len] = corrupted_completion
+                        augmentation_mask[b, prompt_len:actual_len] = corruption_mask
+                    
+                    # Compute labels: 1 if matches ground truth AND not corrupted by augmentation
+                    # For completion positions: correct if x_0_full == ground_truth AND not augmented
+                    prediction_correct = (x_0_full == ground_truth_ids)
+                    not_augmented = ~augmentation_mask
+                    labels = (prediction_correct & not_augmented).float()
+                    
+                    # Prompt tokens are always labeled as correct (not used in loss anyway)
+                    for b in range(batch_size):
+                        prompt_len = prompt_lens[b].item()
+                        labels[b, :prompt_len] = 1.0
+            
+            # Forward pass through remasker with x_0_full and hidden_states from x_t
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
+                logits = model(
+                    x_0=x_0_full,
+                    hidden_states=hidden_states,
+                    attention_mask=attention_mask.float(),
+                )
+                
+                # Get masked logits and labels
+                masked_logits = logits[loss_mask]
+                masked_labels = labels[loss_mask]
+                
+                # Apply label smoothing if enabled
+                if config.label_smoothing_alpha > 0:
+                    masked_labels = masked_labels * (1 - 2 * config.label_smoothing_alpha) + config.label_smoothing_alpha
+                
+                # Compute class weights if enabled
+                if config.use_class_reweighting and masked_labels.numel() > 0:
+                    num_positive = masked_labels.sum()
+                    num_negative = masked_labels.numel() - num_positive
+                    
+                    if num_positive > 0 and num_negative > 0:
+                        pos_weight = num_negative / num_positive
+                    else:
+                        pos_weight = torch.tensor(1.0, device=config.device)
+                    
+                    loss = F.binary_cross_entropy_with_logits(
+                        masked_logits,
+                        masked_labels,
+                        pos_weight=pos_weight,
+                        reduction="mean",
+                    )
+                    batch_pos_weight = pos_weight.item() if isinstance(pos_weight, torch.Tensor) else pos_weight
                 else:
-                    pos_weight = torch.tensor(1.0, device=config.device)
+                    loss = F.binary_cross_entropy_with_logits(
+                        masked_logits,
+                        masked_labels,
+                        reduction="mean",
+                    )
+                    batch_pos_weight = 1.0
+                loss = loss / config.gradient_accumulation_steps
+        
+        else:
+            # Original corruption-based training mode
+            # Get hidden states from backbone (no gradient)
+            with torch.no_grad():
+                with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
+                    backbone_outputs = backbone(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        output_hidden_states=True,
+                        return_dict=True,
+                    )
+                    hidden_states = backbone_outputs.hidden_states[-1]  # Final layer
+            
+            # Forward pass through remasker
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
+                logits = model(
+                    x_0=input_ids,
+                    hidden_states=hidden_states,
+                    attention_mask=attention_mask.float(),
+                )
                 
-                loss = F.binary_cross_entropy_with_logits(
-                    masked_logits,
-                    masked_labels,
-                    pos_weight=pos_weight,
-                    reduction="mean",
-                )
-                batch_pos_weight = pos_weight.item() if isinstance(pos_weight, torch.Tensor) else pos_weight
-            else:
-                # No reweighting
-                loss = F.binary_cross_entropy_with_logits(
-                    masked_logits,
-                    masked_labels,
-                    reduction="mean",
-                )
-                batch_pos_weight = 1.0
-            loss = loss / config.gradient_accumulation_steps
+                # Get masked logits and labels
+                masked_logits = logits[loss_mask]
+                masked_labels = labels[loss_mask]
+                
+                # Apply label smoothing if enabled: 0 -> alpha, 1 -> 1-alpha
+                if config.label_smoothing_alpha > 0:
+                    masked_labels = masked_labels * (1 - 2 * config.label_smoothing_alpha) + config.label_smoothing_alpha
+                
+                # Compute class weights if enabled
+                if config.use_class_reweighting and masked_labels.numel() > 0:
+                    # Count positive (correct) and negative (corrupted) samples
+                    num_positive = masked_labels.sum()
+                    num_negative = masked_labels.numel() - num_positive
+                    
+                    # pos_weight: weight for positive class to balance with negative class
+                    # If positive is majority, pos_weight < 1 to down-weight positives
+                    # This is equivalent to up-weighting negatives
+                    if num_positive > 0 and num_negative > 0:
+                        pos_weight = num_negative / num_positive
+                    else:
+                        pos_weight = torch.tensor(1.0, device=config.device)
+                    
+                    loss = F.binary_cross_entropy_with_logits(
+                        masked_logits,
+                        masked_labels,
+                        pos_weight=pos_weight,
+                        reduction="mean",
+                    )
+                    batch_pos_weight = pos_weight.item() if isinstance(pos_weight, torch.Tensor) else pos_weight
+                else:
+                    # No reweighting
+                    loss = F.binary_cross_entropy_with_logits(
+                        masked_logits,
+                        masked_labels,
+                        reduction="mean",
+                    )
+                    batch_pos_weight = 1.0
+                loss = loss / config.gradient_accumulation_steps
         
         # Compute classification metrics (no grad needed)
         with torch.no_grad():
@@ -662,6 +947,20 @@ def main(config: RemaskerTrainingConfig):
     ).to(config.device)
     backbone.eval()
     
+    # Get mask token id for denoising training
+    mask_token_id = getattr(backbone.config, 'mask_token_id', None)
+    if config.use_denoising_training and mask_token_id is None:
+        # Try to get from tokenizer or use a default
+        mask_token_id = getattr(tokenizer, 'mask_token_id', None)
+        if mask_token_id is None:
+            # Use a common convention: vocab_size (out of vocabulary token)
+            mask_token_id = backbone.config.vocab_size
+            print(f"Warning: No mask_token_id found, using {mask_token_id}")
+        else:
+            print(f"Using tokenizer mask_token_id: {mask_token_id}")
+    elif config.use_denoising_training:
+        print(f"Using backbone mask_token_id: {mask_token_id}")
+    
     # Get backbone config for remasker
     backbone_config = backbone.config
     
@@ -709,8 +1008,8 @@ def main(config: RemaskerTrainingConfig):
     train_data, eval_data = load_data(config)
     
     # Create datasets
-    train_dataset = RemaskerDataset(train_data, tokenizer, backbone, config, is_eval=False)
-    eval_dataset = RemaskerDataset(eval_data, tokenizer, backbone, config, is_eval=True)
+    train_dataset = RemaskerDataset(train_data, tokenizer, backbone, config, is_eval=False, mask_token_id=mask_token_id)
+    eval_dataset = RemaskerDataset(eval_data, tokenizer, backbone, config, is_eval=True, mask_token_id=mask_token_id)
     
     # Create dataloaders
     pad_token_id = tokenizer.pad_token_id or tokenizer.eos_token_id or 0
@@ -785,11 +1084,14 @@ def main(config: RemaskerTrainingConfig):
     print(f"Class reweighting: {'enabled' if config.use_class_reweighting else 'disabled'}")
     if config.label_smoothing_alpha > 0:
         print(f"Label smoothing: alpha={config.label_smoothing_alpha} (0->{config.label_smoothing_alpha:.3f}, 1->{1-config.label_smoothing_alpha:.3f})")
+    if config.use_denoising_training:
+        print(f"Denoising training: t_on={config.denoising_t_on}, t_off={config.denoising_t_off}, temperature={config.denoising_temperature}")
     
     for epoch in range(config.epochs):
         # Train
         train_loss, global_step = train_epoch(
-            model, backbone, train_loader, optimizer, scheduler, config, epoch, global_step, save_path
+            model, backbone, train_loader, optimizer, scheduler, config, epoch, global_step, save_path,
+            mask_token_id=mask_token_id, tokenizer=tokenizer
         )
         print(f"\nEpoch {epoch + 1} - Train loss: {train_loss:.4f}")
         
@@ -869,6 +1171,12 @@ if __name__ == "__main__":
     parser.add_argument("--no_class_reweighting", action="store_true", help="Disable class reweighting for imbalanced classes")
     parser.add_argument("--label_smoothing_alpha", type=float, default=0.0, help="Label smoothing: 0->alpha, 1->1-alpha (default: 0.0, no smoothing)")
     
+    # Denoising training mode
+    parser.add_argument("--use_denoising_training", action="store_true", help="Use denoising-based training that matches inference")
+    parser.add_argument("--denoising_t_on", type=float, default=0.1, help="Upper bound for timestep sampling in denoising mode")
+    parser.add_argument("--denoising_t_off", type=float, default=0.1, help="Lower bound for timestep sampling in denoising mode")
+    parser.add_argument("--denoising_temperature", type=float, default=0.0, help="Temperature for sampling x_0 from logits (0 = greedy)")
+    
     # Other
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=4)
@@ -914,6 +1222,10 @@ if __name__ == "__main__":
         save_every_n_steps=args.save_every_n_steps,
         eval_ratio=args.eval_ratio,
         fp16=not args.no_fp16,
+        use_denoising_training=args.use_denoising_training,
+        denoising_t_on=args.denoising_t_on,
+        denoising_t_off=args.denoising_t_off,
+        denoising_temperature=args.denoising_temperature,
     )
     
     main(config)
