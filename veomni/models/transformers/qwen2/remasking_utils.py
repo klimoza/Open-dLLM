@@ -147,6 +147,7 @@ def get_remasking_logits(
     source: str = "random",
     device: torch.device = None,
     dtype: torch.dtype = torch.float32,
+    temperature: float = 1.0,
     # Additional parameters for model-based remasking
     x_0: torch.Tensor = None,
     hidden_states: torch.Tensor = None,
@@ -166,6 +167,9 @@ def get_remasking_logits(
                 - "model": use trained remasker model
         device: Device to create tensor on
         dtype: Data type for the logits tensor
+        temperature: Temperature for scaling logits (default 1.0). Higher values make
+                    selection more uniform, lower values make it more deterministic.
+                    When temperature=0, selection is fully deterministic (top-k by logits).
         x_0: Predicted token ids [B, L] (required for source="model")
         hidden_states: Hidden states from backbone [B, L, D] (required for source="model")
         remasker_model: Trained Remasker model instance (required for source="model")
@@ -199,6 +203,14 @@ def get_remasking_logits(
         
         # Ensure correct dtype
         logits = logits.to(dtype)
+        
+        # Apply temperature scaling
+        if temperature > 0:
+            logits = logits / temperature
+        else:
+            # Temperature=0: deterministic selection (top-k without randomness)
+            # Scale logits high to make Gumbel noise negligible
+            logits = logits * 1e6
     
     elif source == "confs":
         # Use model confidence scores (to be implemented)

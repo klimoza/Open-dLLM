@@ -36,12 +36,12 @@ if tokenizer.mask_token is None:
 # Write a function in Python which merges two sorted lists into a single sorted list.
 # """
 # prompt = "\ndef count_up_to(n):\n    \"\"\"Implement a function that takes an non-negative integer and returns an array of the first n\n    integers that are prime numbers and less than n.\n    for example:\n    count_up_to(5) => [2,3]\n    count_up_to(11) => [2,3,5,7]\n    count_up_to(0) => []\n    count_up_to(20) => [2,3,5,7,11,13,17,19]\n    count_up_to(1) => []\n    count_up_to(18) => [2,3,5,7,11,13,17]\n    \"\"\"\n"
-prompt = "def sum(a, b):\n    \"\"\"Return the sum of two numbers.\"\"\"\n"
+prompt = "def factorial(n):\n    \"\"\"Return the factorial of a non-negative integer.\"\"\"\n"
 
 input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
 
 max_new_tokens = 64
-steps = 48
+steps = 64
 
 # Create a generation configuration object
 generation_config = MDMGenerationConfig(
@@ -58,14 +58,14 @@ generation_config = MDMGenerationConfig(
     return_dict_in_generate=True,
     output_history=True,
     remasking_config=RemaskingConfig(
-        schedule="loop",
+        schedule="linear",
         remasking_t_on=0.4,
-        remasking_t_off=0.2,
+        remasking_t_off=0.1,
         remasking_alpha_on=0.9,
         remasking_logits_source="model",
-        remasker_checkpoint_path="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_random-denoising-t0.2-t0.1-temp0.0/step_15000",
+        remasker_checkpoint_path="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_from_backbone-denoising-t0.2-t0.1-temp0.0/step_30000",
         non_remasking_sampling_algorithm="entropy",
-        remasking_temperature=0.001,
+        remasking_temperature=10000.001,
     )
 )
 
@@ -86,10 +86,10 @@ generated_sequences = outputs.sequences
 for i in range(steps):
     masks = ((outputs['history'][i][0]==tokenizer.mask_token_id).int().tolist())
     masks = "".join(["M" if m else " " for m in masks])
-    # print(masks)
+    print(masks)
     # INSERT_YOUR_CODE
-    num_masks = sum([m == "M" for m in masks])
-    print(f"Step {i+1}: {num_masks} masked tokens")
+    # num_masks = sum([m == "M" for m in masks])
+    # print(f"Step {i+1}: {num_masks} masked tokens")
     # print()
     # print("--------------------------------")
     # print()

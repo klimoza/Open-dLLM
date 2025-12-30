@@ -427,6 +427,7 @@ class MDMGenerationMixin:
                         source=remasking_cfg.remasking_logits_source,
                         device=x.device,
                         dtype=logits.dtype,
+                        temperature=remasking_cfg.remasking_temperature,
                         # Additional parameters for model-based remasking
                         x_0=x0_full,
                         hidden_states=hidden_states,

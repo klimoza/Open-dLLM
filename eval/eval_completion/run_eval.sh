@@ -3,7 +3,7 @@
 MODEL_PATH="fredzzp/open-dcoder-0.5B"
 # MODEL_PATH="/home/ubuntu/working_dir/logs/Open_DLLM_SFT_code/checkpoints/global_step_26/hf_ckpt"
 MAX_NEW_TOKENS=128
-STEPS=128
+STEPS=32
 TEMPERATURE=0.8
 ALG="entropy"
 NUM_PROCESSES=8
@@ -26,7 +26,8 @@ export HF_ALLOW_CODE_EVAL=1
 # === Remasking evaluation example ===
 # Uncomment and configure the following to evaluate with remasking:
 
-REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_random-denoising-t0.2-t0.1-temp0.0/step_15000"
+# REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_random-denoising-t0.2-t0.1-temp0.0/step_15000"
+REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_from_backbone-denoising-t0.2-t0.1-temp0.0/step_30000"
 # remasker-training-open-dcoder-0.5B-lr-1e-5-bs8-grad-acc32-random-0.05-repeat-0.05-label-smoothing-0.05
 ALG_REMASKING="remasking"
 REMASKING_SCHEDULE="linear"
