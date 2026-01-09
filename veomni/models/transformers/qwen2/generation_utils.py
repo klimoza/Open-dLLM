@@ -85,7 +85,7 @@ class RemaskingConfig:
         self.remasking_temperature = kwargs.pop("remasking_temperature", 1.0)
 
         self.non_remasking_sampling_algorithm = kwargs.pop("non_remasking_sampling_algorithm", "origin")
-        # non_remasking_sampling_algorithm: origin, topk_margin, entropy, maskgit_plus
+        # non_remasking_sampling_algorithm: origin, topk_margin, entropy, maskgit_plus, p2
         
         # Remasker model checkpoint path (for remasking_logits_source="model")
         self.remasker_checkpoint_path = kwargs.pop("remasker_checkpoint_path", None)
@@ -368,56 +368,63 @@ class MDMGenerationMixin:
                 # Remasking algorithm with configurable alpha schedule
                 remasking_cfg = generation_config.remasking_config
                 
-                # Predict x_0 for all masked positions
-                confidence, x0 = sample_tokens(
-                    mask_logits, temperature=temperature, top_p=top_p, top_k=top_k, alg="origin"
-                )
-                
-                # Build the full x0 predictions early (needed for model-based remasking)
-                x0_full = x.clone()
-                x0_full[mask_index] = x0
-                
-                # Load remasker model if using model-based remasking (lazy loading)
-                remasker_model = None
-                if remasking_cfg.remasking_logits_source == "model":
-                    if remasking_cfg._remasker_model is None:
-                        if remasking_cfg.remasker_checkpoint_path is None:
-                            raise ValueError(
-                                "remasker_checkpoint_path must be set in remasking_config when "
-                                "remasking_logits_source='model'"
-                            )
-                        remasking_cfg._remasker_model = load_remasker_model(
-                            remasking_cfg.remasker_checkpoint_path,
-                            device=str(self.device),
-                        )
-                        remasking_cfg._remasker_model.to(self.device)
-                    remasker_model = remasking_cfg._remasker_model
-                
-                # Compute alpha (ratio of tokens to keep unmasked) based on schedule
-                alpha = compute_alpha(
-                    t=t.item(),
-                    schedule=remasking_cfg.schedule,
-                    t_on=remasking_cfg.remasking_t_on,
-                    t_off=remasking_cfg.remasking_t_off,
-                    alpha_on=remasking_cfg.remasking_alpha_on,
-                    eps=eps
-                )
-                
-                # Calculate number of completion tokens and how many to unmask
-                # Only consider completion tokens (those that were originally masked, i.e., ~fix_mask)
-                num_completion_tokens = (~fix_mask).sum(dim=1)  # [B]
-                num_to_unmask = (num_completion_tokens.float() * alpha).floor().long()  # [B]
-                num_to_unmask = num_to_unmask.clamp(min=0)
-                num_to_unmask = torch.minimum(num_to_unmask, num_completion_tokens)
+                # Check if remasking could ever be active (t_on > t_off means there's a remasking window)
+                remasking_ever_active = abs(remasking_cfg.remasking_t_on - remasking_cfg.remasking_t_off) >= 1e-6
                 
                 # Check if remasking is active at current timestep
-                remasking_active = is_remasking_active(
+                remasking_active = remasking_ever_active and is_remasking_active(
                     t=t.item(),
                     t_on=remasking_cfg.remasking_t_on,
                     t_off=remasking_cfg.remasking_t_off
                 )
                 
+                # Only compute x0_full when remasking is active (needed for remasking logic)
+                # This avoids consuming random numbers when we just want to match the base algorithm
+                x0_full = None
+                remasker_model = None
+                alpha = None
+                
                 if remasking_active:
+                    # Predict x_0 for all masked positions
+                    confidence, x0 = sample_tokens(
+                        mask_logits, temperature=temperature, top_p=top_p, top_k=top_k, alg="origin"
+                    )
+                    
+                    # Build the full x0 predictions (needed for model-based remasking)
+                    x0_full = x.clone()
+                    x0_full[mask_index] = x0
+                    
+                    # Load remasker model if using model-based remasking (lazy loading)
+                    if remasking_cfg.remasking_logits_source == "model":
+                        if remasking_cfg._remasker_model is None:
+                            if remasking_cfg.remasker_checkpoint_path is None:
+                                raise ValueError(
+                                    "remasker_checkpoint_path must be set in remasking_config when "
+                                    "remasking_logits_source='model'"
+                                )
+                            remasking_cfg._remasker_model = load_remasker_model(
+                                remasking_cfg.remasker_checkpoint_path,
+                                device=str(self.device),
+                            )
+                            remasking_cfg._remasker_model.to(self.device)
+                        remasker_model = remasking_cfg._remasker_model
+                    
+                    # Compute alpha (ratio of tokens to keep unmasked) based on schedule
+                    alpha = compute_alpha(
+                        t=t.item(),
+                        schedule=remasking_cfg.schedule,
+                        t_on=remasking_cfg.remasking_t_on,
+                        t_off=remasking_cfg.remasking_t_off,
+                        alpha_on=remasking_cfg.remasking_alpha_on,
+                        eps=eps
+                    )
+                    
+                    # Calculate number of completion tokens and how many to unmask
+                    num_completion_tokens = (~fix_mask).sum(dim=1)  # [B]
+                    num_to_unmask = (num_completion_tokens.float() * alpha).floor().long()  # [B]
+                    num_to_unmask = num_to_unmask.clamp(min=0)
+                    num_to_unmask = torch.minimum(num_to_unmask, num_completion_tokens)
+                    
                     # Use Gumbel sampling to select which tokens to unmask
                     # Candidates are completion positions only (~fix_mask)
                     remasking_logits = get_remasking_logits(
@@ -443,28 +450,49 @@ class MDMGenerationMixin:
                     x[~fix_mask] = mask_token_id
                     # Then unmask the selected positions
                     x[unmask_selection] = x0_full[unmask_selection]
+                
                 else:
                     # No remasking: use the non_remasking_sampling_algorithm
                     non_remasking_alg = remasking_cfg.non_remasking_sampling_algorithm
                     
-                    # Compute alpha at next step s for calculating transfer ratio
-                    alpha_s = compute_alpha(
-                        t=s.item(),
-                        schedule=remasking_cfg.schedule,
-                        t_on=remasking_cfg.remasking_t_on,
-                        t_off=remasking_cfg.remasking_t_off,
-                        alpha_on=remasking_cfg.remasking_alpha_on,
-                        eps=eps
-                    )
-                    
-                    # Calculate transfer ratio based on alpha
-                    # alpha is alpha_t (computed earlier), alpha_s is alpha at next step
-                    # transfer_ratio = (alpha_s - alpha_t) / (1 - alpha_t)
+                    # Calculate transfer ratio
+                    # Only use simple (1-s/t) formula when:
+                    #   - schedule is "linear" AND t_on == t_off (no remasking window)
+                    # This ensures behavior matches the base algorithm exactly in that case.
+                    # For loop schedule (or any actual remasking window), use alpha-based
+                    # formula to respect the intended schedule.
                     if i < steps - 1:
-                        if alpha < 1.0:
-                            transfer_ratio = (alpha_s - alpha) / (1.0 - alpha)
+                        use_simple_ratio = (
+                            remasking_cfg.schedule == "linear" and 
+                            not remasking_ever_active
+                        )
+                        if use_simple_ratio:
+                            # Linear schedule with no remasking window: match original algorithm
+                            # Note: p2 uses a different formula, handled in its own block
+                            transfer_ratio = 1.0 - (s.item() / t.item())
                         else:
-                            transfer_ratio = 1.0
+                            # Loop schedule or actual remasking window: use alpha-based transfer ratio
+                            # Compute alpha for current timestep t
+                            alpha_t = compute_alpha(
+                                t=t.item(),
+                                schedule=remasking_cfg.schedule,
+                                t_on=remasking_cfg.remasking_t_on,
+                                t_off=remasking_cfg.remasking_t_off,
+                                alpha_on=remasking_cfg.remasking_alpha_on,
+                                eps=eps
+                            )
+                            alpha_s = compute_alpha(
+                                t=s.item(),
+                                schedule=remasking_cfg.schedule,
+                                t_on=remasking_cfg.remasking_t_on,
+                                t_off=remasking_cfg.remasking_t_off,
+                                alpha_on=remasking_cfg.remasking_alpha_on,
+                                eps=eps
+                            )
+                            if alpha_t < 1.0:
+                                transfer_ratio = (alpha_s - alpha_t) / (1.0 - alpha_t)
+                            else:
+                                transfer_ratio = 1.0
                     else:
                         transfer_ratio = 1.0
                     
@@ -485,7 +513,7 @@ class MDMGenerationMixin:
                         # Calculate number of mask tokens per sample
                         num_mask_tokens_per_sample = mask_index.sum(dim=1)  # [batch_size]
                         
-                        # Calculate transfer tokens per sample using alpha-based transfer ratio
+                        # Calculate transfer tokens per sample using transfer ratio
                         number_transfer_tokens_per_sample = (num_mask_tokens_per_sample.float() * transfer_ratio).long()
                         
                         # Build full confidence matrix
@@ -521,6 +549,69 @@ class MDMGenerationMixin:
                             
                             # Apply transfer
                             x[valid_batch_indices, valid_transfer_indices] = x_[valid_batch_indices, valid_transfer_indices]
+                    
+                    elif non_remasking_alg == "p2":
+                        # Exact copy of p2 algorithm, only kappa_t is different
+                        # kappa_t = fraction of variable positions that should be UNMASKED (cumulative)
+                        # Use original p2 kappa_t formula when no remasking window is active
+                        if remasking_cfg.schedule == "linear" and not remasking_ever_active:
+                            kappa_t = (i + 1) / steps
+                        else:
+                            # When remasking is active, kappa_t = alpha_s (target unmasked fraction)
+                            kappa_t = compute_alpha(
+                                t=s.item(),
+                                schedule=remasking_cfg.schedule,
+                                t_on=remasking_cfg.remasking_t_on,
+                                t_off=remasking_cfg.remasking_t_off,
+                                alpha_on=remasking_cfg.remasking_alpha_on,
+                                eps=eps
+                            )
+
+                        # Compute confidence and sampled tokens for the entire sequence:
+                        #   conf_full: [B, L], confidence of the sampled token at each position
+                        #   x0_full:  [B, L], sampled token IDs for each position
+                        conf_full, x0_full = sample_tokens(
+                            logits, temperature=temperature, top_p=top_p, top_k=top_k, alg="p2"
+                        )
+
+                        # Construct full_conf matrix and mask out fixed positions
+                        # Only positions in (~fix_mask) are candidates for masking/unmasking
+                        full_conf = conf_full.clone()
+                        full_conf[fix_mask] = float("inf")
+                        # Prevent NaNs or extreme values from interfering
+                        full_conf = torch.where(
+                            torch.isfinite(full_conf), full_conf, torch.full_like(full_conf, float("inf"))
+                        )
+
+                        # Calculate how many positions to re-mask per sample
+                        # = number of variable positions * (1 - kappa_t)
+                        num_positions = (~fix_mask).sum(dim=1)  # [B]
+                        num_to_mask = (num_positions.float() * (1.0 - kappa_t)).floor().to(torch.long)
+                        # Boundaries: at least 0, at most total number of variable positions
+                        num_to_mask = num_to_mask.clamp_min(0)
+                        num_to_mask = torch.minimum(num_to_mask, num_positions)
+
+                        # Select the lowest-confidence positions within (~fix_mask) for re-masking
+                        sorted_idx = torch.argsort(full_conf, dim=1, descending=False)  # [B, L]
+                        max_k = int(num_to_mask.max().item())
+                        if max_k > 0:
+                            topk_idx = sorted_idx[:, :max_k]  # [B, max_k]
+                            row_mask = torch.arange(max_k, device=x.device).unsqueeze(0) < num_to_mask.unsqueeze(1)  # [B, max_k]
+
+                            to_mask = torch.zeros_like(x, dtype=torch.bool)
+                            batch_arange = torch.arange(x.size(0), device=x.device).unsqueeze(1).expand_as(topk_idx)  # [B, max_k]
+                            valid_batch = batch_arange[row_mask]  # [sum_k]
+                            valid_col   = topk_idx[row_mask]      # [sum_k]
+                            to_mask[valid_batch, valid_col] = True
+                        else:
+                            to_mask = torch.zeros_like(x, dtype=torch.bool)
+
+                        # Apply re-masking: set selected positions back to mask_token_id
+                        x[to_mask] = mask_token_id
+
+                        # For positions that started as mask and were not re-masked, unmask them with sampled tokens
+                        keep_unmask = mask_index & (~to_mask)
+                        x[keep_unmask] = x0_full[keep_unmask]
                     
                     else:
                         raise NotImplementedError(f"Non-remasking algorithm '{non_remasking_alg}' not implemented.")

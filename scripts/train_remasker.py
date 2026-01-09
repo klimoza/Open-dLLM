@@ -71,6 +71,7 @@ class RemaskerTrainingConfig:
     # Remasker initialization from backbone
     init_from_backbone: bool = False  # Initialize remasker layers from backbone
     init_layer_offset: int = -1  # Which backbone layer to start from (-1 = auto: use last N layers)
+    use_hidden_states: bool = True  # Whether to condition remasker on backbone hidden states
     
     # Corruption settings
     random_corruption_ratio: float = 0.1  # a% of tokens changed to random
@@ -651,11 +652,11 @@ def train_epoch(
                     backbone_outputs = backbone(
                         input_ids=x_t,
                         attention_mask=attention_mask,
-                        output_hidden_states=True,
+                        output_hidden_states=config.use_hidden_states,
                         return_dict=True,
                         is_causal=False,  # Bidirectional attention for MDM
                     )
-                    hidden_states = backbone_outputs.hidden_states[-1]
+                    hidden_states = backbone_outputs.hidden_states[-1] if config.use_hidden_states else None
                     backbone_logits = backbone_outputs.logits
                     
                     # CRITICAL: Shift logits to predict the next token (matching inference)
@@ -748,16 +749,19 @@ def train_epoch(
         
         else:
             # Original corruption-based training mode
-            # Get hidden states from backbone (no gradient)
-            with torch.no_grad():
-                with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
-                    backbone_outputs = backbone(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        output_hidden_states=True,
-                        return_dict=True,
-                    )
-                    hidden_states = backbone_outputs.hidden_states[-1]  # Final layer
+            # Get hidden states from backbone (no gradient) if needed
+            if config.use_hidden_states:
+                with torch.no_grad():
+                    with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
+                        backbone_outputs = backbone(
+                            input_ids=input_ids,
+                            attention_mask=attention_mask,
+                            output_hidden_states=True,
+                            return_dict=True,
+                        )
+                        hidden_states = backbone_outputs.hidden_states[-1]  # Final layer
+            else:
+                hidden_states = None
             
             # Forward pass through remasker
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
@@ -883,15 +887,18 @@ def evaluate(
         loss_mask = batch["loss_mask"].to(config.device)
         attention_mask = batch["attention_mask"].to(config.device)
         
-        # Get hidden states from backbone
+        # Get hidden states from backbone if needed
         with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
-            backbone_outputs = backbone(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-                return_dict=True,
-            )
-            hidden_states = backbone_outputs.hidden_states[-1]
+            if config.use_hidden_states:
+                backbone_outputs = backbone(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
+                hidden_states = backbone_outputs.hidden_states[-1]
+            else:
+                hidden_states = None
             
             # Forward pass through remasker
             logits = model(
@@ -976,9 +983,10 @@ def main(config: RemaskerTrainingConfig):
         num_key_value_heads=config.remasker_num_key_value_heads or backbone_config.num_key_value_heads,
         vocab_size=backbone_config.vocab_size,
         backbone_hidden_size=backbone_config.hidden_size,
+        use_hidden_states=config.use_hidden_states,
     )
     
-    print(f"Creating remasker with {config.remasker_num_layers} layers...")
+    print(f"Creating remasker with {config.remasker_num_layers} layers (use_hidden_states={config.use_hidden_states})...")
     
     if config.init_from_backbone:
         # Calculate layer offset (default: use last N layers from backbone)
@@ -1140,6 +1148,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_key_value_heads", type=int, default=None)
     parser.add_argument("--init_from_backbone", action="store_true", help="Initialize remasker layers from backbone model")
     parser.add_argument("--init_layer_offset", type=int, default=-1, help="Which backbone layer to start copying from (-1 = auto: use last N layers)")
+    parser.add_argument("--no_hidden_states", action="store_true", help="Don't condition remasker on backbone hidden states (use only token embeddings)")
     
     # Corruption settings
     parser.add_argument("--random_corruption_ratio", type=float, default=0.1)
@@ -1197,6 +1206,7 @@ if __name__ == "__main__":
         remasker_num_key_value_heads=args.num_key_value_heads,
         init_from_backbone=args.init_from_backbone,
         init_layer_offset=args.init_layer_offset,
+        use_hidden_states=not args.no_hidden_states,
         random_corruption_ratio=args.random_corruption_ratio,
         repeat_corruption_ratio=args.repeat_corruption_ratio,
         dataset_path=args.dataset_path,

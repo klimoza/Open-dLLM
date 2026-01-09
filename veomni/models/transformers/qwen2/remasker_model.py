@@ -19,6 +19,7 @@ class RemaskerConfig:
     num_key_value_heads: int = 2
     vocab_size: int = 151936
     backbone_hidden_size: int = 896  # Hidden size of the backbone model
+    use_hidden_states: bool = True  # Whether to condition on backbone hidden states
     
     # Attention settings
     attention_dropout: float = 0.0
@@ -61,6 +62,7 @@ class RemaskerConfig:
             "num_key_value_heads": self.num_key_value_heads,
             "vocab_size": self.vocab_size,
             "backbone_hidden_size": self.backbone_hidden_size,
+            "use_hidden_states": self.use_hidden_states,
             "attention_dropout": self.attention_dropout,
             "hidden_act": self.hidden_act,
             "max_position_embeddings": self.max_position_embeddings,
@@ -83,10 +85,14 @@ class Remasker(nn.Module):
     Takes as input:
         - x_0: predicted tokens from denoiser [B, L]
         - hidden_states: hidden states from backbone [B, L, backbone_hidden_size]
+          (optional if use_hidden_states=False in config)
     
     Outputs:
         - correctness_logits: logits indicating token correctness [B, L]
           (higher = more likely correct, used for Gumbel sampling)
+    
+    When use_hidden_states=False, the model only uses token embeddings without
+    conditioning on backbone hidden states.
     """
     
     def __init__(self, config: RemaskerConfig):
@@ -96,14 +102,18 @@ class Remasker(nn.Module):
         # Token embedding for x_0
         self.token_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
         
-        # Projection for backbone hidden states (if different size)
-        if config.backbone_hidden_size != config.hidden_size:
-            self.hidden_proj = nn.Linear(config.backbone_hidden_size, config.hidden_size)
+        # Projection for backbone hidden states (if using them)
+        if config.use_hidden_states:
+            if config.backbone_hidden_size != config.hidden_size:
+                self.hidden_proj = nn.Linear(config.backbone_hidden_size, config.hidden_size)
+            else:
+                self.hidden_proj = nn.Identity()
+            
+            # Combination layer (embedding + projected hidden states)
+            self.combine_proj = nn.Linear(config.hidden_size * 2, config.hidden_size)
         else:
-            self.hidden_proj = nn.Identity()
-        
-        # Combination layer (embedding + projected hidden states)
-        self.combine_proj = nn.Linear(config.hidden_size * 2, config.hidden_size)
+            self.hidden_proj = None
+            self.combine_proj = None
         
         # Get Qwen2 config for decoder layers
         qwen2_config = config.to_qwen2_config()
@@ -142,7 +152,7 @@ class Remasker(nn.Module):
     def forward(
         self,
         x_0: torch.LongTensor,
-        hidden_states: torch.Tensor,
+        hidden_states: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
@@ -151,6 +161,7 @@ class Remasker(nn.Module):
         Args:
             x_0: Predicted token ids [B, L]
             hidden_states: Hidden states from backbone [B, L, backbone_hidden_size]
+                          (optional if use_hidden_states=False in config)
             attention_mask: Optional attention mask [B, L]
         
         Returns:
@@ -162,12 +173,18 @@ class Remasker(nn.Module):
         # Embed x_0 tokens
         token_embeds = self.token_embedding(x_0)  # [B, L, hidden_size]
         
-        # Project backbone hidden states
-        projected_hidden = self.hidden_proj(hidden_states)  # [B, L, hidden_size]
-        
-        # Combine embeddings and hidden states
-        combined = torch.cat([token_embeds, projected_hidden], dim=-1)  # [B, L, hidden_size * 2]
-        hidden = self.combine_proj(combined)  # [B, L, hidden_size]
+        if self.config.use_hidden_states:
+            if hidden_states is None:
+                raise ValueError("hidden_states must be provided when use_hidden_states=True")
+            # Project backbone hidden states
+            projected_hidden = self.hidden_proj(hidden_states)  # [B, L, hidden_size]
+            
+            # Combine embeddings and hidden states
+            combined = torch.cat([token_embeds, projected_hidden], dim=-1)  # [B, L, hidden_size * 2]
+            hidden = self.combine_proj(combined)  # [B, L, hidden_size]
+        else:
+            # Use only token embeddings (no hidden state conditioning)
+            hidden = token_embeds
         
         # Create position ids
         position_ids = torch.arange(seq_len, device=device).unsqueeze(0).expand(batch_size, -1)

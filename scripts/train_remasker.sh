@@ -8,7 +8,7 @@ DENOISING_T_ON=0.2
 DENOISING_T_OFF=0.1
 DENOISING_TEMP=0.0
 LAYERS=12
-run_name="remasker-training-open-dcoder-0.5B-layers${LAYERS}-lr${LR}-bs${BS}-ga${GRAD_ACC}-rand${RANDOM_CORRUPTION_RATIO}-rep${REPEAT_CORRUPTION_RATIO}-ls${LABEL_SMOOTHING_ALPHA}-init_from_backbone-denoising-t${DENOISING_T_ON}-t${DENOISING_T_OFF}-temp${DENOISING_TEMP}"
+run_name="remasker-training-open-dcoder-0.5B-layers${LAYERS}-lr${LR}-bs${BS}-ga${GRAD_ACC}-rand${RANDOM_CORRUPTION_RATIO}-rep${REPEAT_CORRUPTION_RATIO}-ls${LABEL_SMOOTHING_ALPHA}-init_from_backbone-denoising-t${DENOISING_T_ON}-t${DENOISING_T_OFF}-temp${DENOISING_TEMP}-no_hidden_states"
 
 CUDA_VISIBLE_DEVICES=0 python scripts/train_remasker.py \
     --backbone_path fredzzp/open-dcoder-0.5B \
@@ -22,6 +22,7 @@ CUDA_VISIBLE_DEVICES=0 python scripts/train_remasker.py \
     --wandb_project remasker-training \
     --wandb_run_name $run_name \
     --use_wandb \
+    --no_hidden_states \
     --random_corruption_ratio $RANDOM_CORRUPTION_RATIO \
     --repeat_corruption_ratio $REPEAT_CORRUPTION_RATIO \
     --label_smoothing_alpha $LABEL_SMOOTHING_ALPHA \

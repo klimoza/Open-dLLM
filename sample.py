@@ -65,7 +65,7 @@ generation_config = MDMGenerationConfig(
         remasking_logits_source="model",
         remasker_checkpoint_path="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_from_backbone-denoising-t0.2-t0.1-temp0.0/step_30000",
         non_remasking_sampling_algorithm="entropy",
-        remasking_temperature=10000.001,
+        remasking_temperature=0.0,
     )
 )
 
