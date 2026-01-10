@@ -12,7 +12,7 @@ from transformers import __version__
 from transformers.generation.configuration_utils import GenerationConfig
 from transformers.utils import ModelOutput, is_torchdynamo_compiling, logging
 
-from .remasking_utils import compute_alpha, is_remasking_active, sample_indices_gumbel, get_remasking_logits, load_remasker_model
+from .remasking import compute_alpha, is_remasking_active, sample_indices_gumbel, get_remasking_logits, load_remasker_model
 
 logger = logging.get_logger(__name__)
 

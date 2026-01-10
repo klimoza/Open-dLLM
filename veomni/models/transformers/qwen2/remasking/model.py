@@ -1,81 +1,13 @@
-# veomni/models/transformers/qwen2/remasker_model.py
+# veomni/models/transformers/qwen2/remasking/model.py
 
-from dataclasses import dataclass, field
-from typing import Optional, Tuple
+"""Remasker model for predicting token correctness."""
+
+from typing import Optional
 
 import torch
 import torch.nn as nn
-from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
 
-
-@dataclass
-class RemaskerConfig:
-    """Configuration for the Remasker model."""
-    # Model architecture
-    num_layers: int = 4
-    hidden_size: int = 896
-    intermediate_size: int = 4864
-    num_attention_heads: int = 14
-    num_key_value_heads: int = 2
-    vocab_size: int = 151936
-    backbone_hidden_size: int = 896  # Hidden size of the backbone model
-    use_hidden_states: bool = True  # Whether to condition on backbone hidden states
-    
-    # Attention settings
-    attention_dropout: float = 0.0
-    hidden_act: str = "silu"
-    max_position_embeddings: int = 32768
-    rms_norm_eps: float = 1e-6
-    rope_theta: float = 1000000.0
-    use_sliding_window: bool = False
-    sliding_window: Optional[int] = None
-    
-    # Training settings
-    initializer_range: float = 0.02
-    
-    def to_qwen2_config(self) -> Qwen2Config:
-        """Convert to Qwen2Config for reusing Qwen2DecoderLayer."""
-        return Qwen2Config(
-            hidden_size=self.hidden_size,
-            intermediate_size=self.intermediate_size,
-            num_hidden_layers=self.num_layers,
-            num_attention_heads=self.num_attention_heads,
-            num_key_value_heads=self.num_key_value_heads,
-            vocab_size=self.vocab_size,
-            attention_dropout=self.attention_dropout,
-            hidden_act=self.hidden_act,
-            max_position_embeddings=self.max_position_embeddings,
-            rms_norm_eps=self.rms_norm_eps,
-            rope_theta=self.rope_theta,
-            use_sliding_window=self.use_sliding_window,
-            sliding_window=self.sliding_window,
-            initializer_range=self.initializer_range,
-            _attn_implementation="eager",
-        )
-    
-    def to_dict(self):
-        return {
-            "num_layers": self.num_layers,
-            "hidden_size": self.hidden_size,
-            "intermediate_size": self.intermediate_size,
-            "num_attention_heads": self.num_attention_heads,
-            "num_key_value_heads": self.num_key_value_heads,
-            "vocab_size": self.vocab_size,
-            "backbone_hidden_size": self.backbone_hidden_size,
-            "use_hidden_states": self.use_hidden_states,
-            "attention_dropout": self.attention_dropout,
-            "hidden_act": self.hidden_act,
-            "max_position_embeddings": self.max_position_embeddings,
-            "rms_norm_eps": self.rms_norm_eps,
-            "rope_theta": self.rope_theta,
-            "use_sliding_window": self.use_sliding_window,
-            "sliding_window": self.sliding_window,
-            "initializer_range": self.initializer_range,
-        }
-    
-    @classmethod
-    def from_dict(cls, d: dict) -> "RemaskerConfig":
-        return cls(**d)
+from .config import RemaskerConfig
 
 
 class Remasker(nn.Module):
@@ -119,7 +51,7 @@ class Remasker(nn.Module):
         qwen2_config = config.to_qwen2_config()
         
         # Import here to avoid circular imports
-        from .modeling_qwen2 import Qwen2DecoderLayer, Qwen2RMSNorm, Qwen2RotaryEmbedding
+        from ..modeling_qwen2 import Qwen2DecoderLayer, Qwen2RMSNorm, Qwen2RotaryEmbedding
         
         # Transformer decoder layers
         self.layers = nn.ModuleList([
