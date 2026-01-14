@@ -1,5 +1,5 @@
 model:
-  model_path: Qwen/Qwen2.5-Coder-0.5B
+  model_path: fredzzp/open-dcoder-0.5B
   attn_implementation: flash_attention_2
 
 data:
@@ -15,8 +15,7 @@ data:
   num_workers: 2
 
 train:
-  output_dir: logs/Qwen2.5-Coder-0.5B_mdm
-  repr_align_wt: 0.0  # Weight for representation alignment loss (0 = disabled)
+  output_dir: logs/fredzzp/open_dcoder_0.5B_ft_mask_to_random_0.1
   data_parallel_mode: ddp
   ulysses_parallel_size: 1
   global_batch_size: 512
@@ -47,6 +46,7 @@ train:
   load_checkpoint_path: ""
   save_steps: 10_000
   save_hf_weights: true
-  wandb_project: Qwen2.5-Coder-0.5B
-  wandb_name: Qwen2.5-Coder-0.5B-PT
-  use_wandb: false
+  wandb_project: open-dcoder-0.5B
+  wandb_name: open-dcoder-0.5B-ft-mask-to-random-0.1
+  use_wandb: true
+  mask_to_random_ratio: 0.1

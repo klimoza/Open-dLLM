@@ -246,6 +246,14 @@ class TrainingArguments:
         default=False,
         metadata={"help": "Enable masking during training."},
     )
+    mask_to_random_ratio: float = field(
+        default=0.1,
+        metadata={"help": "Ratio of mask tokens to substitute with random vocabulary tokens (0.0-1.0)."},
+    )
+    denoise_alpha: float = field(
+        default=1.0,
+        metadata={"help": "Partial denoising factor. x_s has (alpha * t) mask ratio. Set < 1.0 to enable."},
+    )
     dyn_bsz: bool = field(
         default=True,
         metadata={"help": "Enable dynamic batch size for padding-free training."},

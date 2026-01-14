@@ -144,24 +144,106 @@ class DataCollatorWithPositionIDs(DataCollator):
 @dataclass
 class DataCollatorWithPositionIDsMasking(DataCollator):
     """
-    Data collator with masking.
+    Data collator with masking and optional corruption modes:
+    - Random token substitution: replace some masks with random tokens
+    - Partial denoising: unmask some positions (x_t -> x_s where s = alpha * t)
+    These modes are mutually exclusive.
     """
-    def __init__(self, mask_token_id: int,):
+    def __init__(
+        self,
+        mask_token_id: int,
+        mask_to_random_ratio: float = 0.0,
+        denoise_alpha: float = 1.0,
+        vocab_size: int = None,
+    ):
         self.mask_token_id = mask_token_id
-    def _random_masking(self, input_ids: "torch.Tensor", labels: "torch.Tensor") -> "torch.Tensor":
+        self.mask_to_random_ratio = mask_to_random_ratio
+        self.denoise_alpha = denoise_alpha
+        self.vocab_size = vocab_size
+        # Minimum token ID to sample from (exclude special tokens 0-255)
+        self.min_random_token_id = 256
+
+    def _partial_denoise(
+        self,
+        input_ids: "torch.Tensor",
+        original_ids: "torch.Tensor",
+        mask_positions: "torch.Tensor",
+    ) -> "torch.Tensor":
         """
-        Randomly mask input_ids.
+        Partially denoise by unmasking some masked positions.
+        
+        Args:
+            input_ids: Tensor with masked tokens (x_t)
+            original_ids: Original token IDs before masking
+            mask_positions: Boolean tensor of masked positions
+        
+        Returns:
+            input_ids: Partially denoised tensor (x_s with s = alpha * t)
+        """
+        # Calculate how many masks to unmask
+        num_masked = mask_positions.sum().item()
+        num_to_keep_masked = int(num_masked * self.denoise_alpha)
+        num_to_unmask = num_masked - num_to_keep_masked
+        
+        if num_to_unmask > 0:
+            # Get indices of masked positions
+            masked_indices = torch.where(mask_positions)[0]
+            # Randomly select positions to unmask
+            perm = torch.randperm(num_masked, device=input_ids.device)
+            indices_to_unmask = masked_indices[perm[:num_to_unmask]]
+            # Replace mask tokens with original tokens
+            input_ids[indices_to_unmask] = original_ids[indices_to_unmask]
+        
+        return input_ids
+
+    def _random_masking(self, input_ids: "torch.Tensor", labels: "torch.Tensor") -> Tuple["torch.Tensor", "torch.Tensor", "torch.Tensor"]:
+        """
+        Randomly mask input_ids and optionally apply corruption (random tokens or partial denoising).
+        
+        Returns:
+            input_ids: Tensor with masked (and optionally corrupted) tokens
+            mask_ratio: The ratio of tokens that were masked
+            original_mask_positions: Boolean tensor indicating originally masked positions (x_t)
         """
         old_input_ids = input_ids.clone()
         mask_ratio = torch.rand(1, device=input_ids.device).clamp(1/500, 1-1/500)
-        # mask_ratio = torch.tensor([1-1/500], device=input_ids.device)
         mask_indices = torch.rand_like(input_ids.float()) < mask_ratio
+        
+        # Apply masking (x_0 -> x_t)
         input_ids[mask_indices] = self.mask_token_id
+        # Restore tokens that should not be masked (IGNORE_INDEX positions)
         input_ids[labels == IGNORE_INDEX] = old_input_ids[labels == IGNORE_INDEX]
-        return input_ids, mask_ratio.repeat(input_ids.size(0))
+        
+        # Track original mask positions (positions that were masked in x_t)
+        # This is used for loss computation regardless of corruption mode
+        original_mask_positions = (input_ids == self.mask_token_id)
+        
+        # Apply corruption mode (mutually exclusive)
+        if self.denoise_alpha < 1.0:
+            # Partial denoising: x_t -> x_s (unmask some positions)
+            input_ids = self._partial_denoise(input_ids, old_input_ids, original_mask_positions)
+        elif self.mask_to_random_ratio > 0 and self.vocab_size is not None:
+            # Random token substitution: replace some masks with random tokens
+            random_sub_candidates = torch.rand_like(input_ids.float()) < self.mask_to_random_ratio
+            positions_to_randomize = original_mask_positions & random_sub_candidates
+            
+            num_positions = positions_to_randomize.sum().item()
+            if num_positions > 0:
+                random_tokens = torch.randint(
+                    low=self.min_random_token_id,
+                    high=self.vocab_size,
+                    size=(num_positions,),
+                    device=input_ids.device,
+                    dtype=input_ids.dtype
+                )
+                input_ids[positions_to_randomize] = random_tokens
+        
+        return input_ids, mask_ratio.repeat(input_ids.size(0)), original_mask_positions
 
     def __call__(self, features: Sequence[Dict[str, "torch.Tensor"]]) -> Dict[str, "torch.Tensor"]:
         batch = {}
+        original_mask_positions_list = []
+        
         for input_name in features[0].keys():
             if input_name in ("input_ids", "attention_mask", "labels", "position_ids"):
                 # Apply random masking only to input_ids, concatenate all features
@@ -169,6 +251,7 @@ class DataCollatorWithPositionIDsMasking(DataCollator):
                     masked_features = [self._random_masking(feature[input_name], feature["labels"]) for feature in features]
                     batch[input_name] = torch.cat(list(i[0] for i in masked_features), dim=-1).unsqueeze(0)
                     batch["mask_ratio"] = torch.cat(list(i[1] for i in masked_features), dim=-1).unsqueeze(0)
+                    original_mask_positions_list = [i[2] for i in masked_features]
                 else:
                     batch[input_name] = torch.cat([feature[input_name] for feature in features], dim=-1).unsqueeze(0)
             else:
@@ -179,8 +262,12 @@ class DataCollatorWithPositionIDsMasking(DataCollator):
                 [torch.arange(len(feature["input_ids"])) for feature in features]
             ).unsqueeze(0)
 
-        if "labels" in batch:
-            batch["labels"][batch["input_ids"] != self.mask_token_id] = IGNORE_INDEX
+        # Set labels based on original mask positions (not current token values)
+        # This ensures loss is computed on all originally-masked positions,
+        # including those substituted with random tokens
+        if "labels" in batch and original_mask_positions_list:
+            original_mask_positions = torch.cat(original_mask_positions_list, dim=-1).unsqueeze(0)
+            batch["labels"][~original_mask_positions] = IGNORE_INDEX
         return batch
 @dataclass
 class NoopDataCollator(DataCollator):

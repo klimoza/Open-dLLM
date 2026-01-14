@@ -74,6 +74,9 @@ def build_dataloader(
     seed: int = 0,
     enable_masking: bool = False,
     mask_token_id: Optional[int] = None,
+    mask_to_random_ratio: float = 0.0,
+    denoise_alpha: float = 1.0,
+    vocab_size: Optional[int] = None,
 ) -> "DistributedDataloader":
     parallel_state = get_parallel_state()
     token_micro_bsz = micro_batch_size * max_seq_len
@@ -94,7 +97,18 @@ def build_dataloader(
         if enable_masking:
             if mask_token_id is None:
                 raise ValueError("mask_token_id must be provided when enable_masking is True")
-            collate_fn = DataCollatorWithPositionIDsMasking(mask_token_id)
+            # Validate mutual exclusivity of corruption modes
+            if mask_to_random_ratio > 0 and denoise_alpha < 1.0:
+                raise ValueError(
+                    "mask_to_random_ratio and denoise_alpha are mutually exclusive. "
+                    "Set mask_to_random_ratio=0 to use partial denoising, or denoise_alpha=1.0 to use random token substitution."
+                )
+            collate_fn = DataCollatorWithPositionIDsMasking(
+                mask_token_id=mask_token_id,
+                mask_to_random_ratio=mask_to_random_ratio,
+                denoise_alpha=denoise_alpha,
+                vocab_size=vocab_size,
+            )
         else:
             if rmpad:
                 collate_fn = DataCollatorWithPacking()
