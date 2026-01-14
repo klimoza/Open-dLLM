@@ -12,7 +12,8 @@ export CUDA_VISIBLE_DEVICES="0"
 export HF_ALLOW_CODE_EVAL=1
 # REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_from_backbone-denoising-t0.2-t0.1-temp0.0-no_hidden_states/step_5000"
 # REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_from_backbone-denoising-t0.2-t0.1-temp0.0/step_45000"
-REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_from_backbone-denoising-t0.2-t0.1-temp0.0-no_hidden_states/step_20000"
+# REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_from_backbone-denoising-t0.2-t0.1-temp0.0-no_hidden_states/step_20000"
+REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.1-t0.05-temp0.0-no_hidden_states-several_steps4_temp0.0/step_5000"
 ALG_REMASKING="remasking"
 REMASKING_LOGITS_SOURCE="model"
 
@@ -61,8 +62,8 @@ for REMASKING_TEMPERATURE in "${REMASKING_TEMPERATURE_LIST[@]}"; do
         --model_args "pretrained=$MODEL_PATH,max_new_tokens=$MAX_NEW_TOKENS,steps=$STEPS,add_bos_token=true,temperature=$TEMPERATURE,top_p=0.95,alg=$ALG_REMASKING,remasking_schedule=$REMASKING_SCHEDULE,remasking_t_on=$REMASKING_T_ON,remasking_t_off=$REMASKING_T_OFF,remasking_alpha_on=$REMASKING_ALPHA_ON,remasking_logits_source=$REMASKING_LOGITS_SOURCE,remasker_checkpoint_path=$REMASKER_PATH,non_remasking_sampling_algorithm=$NON_REMASKING_SAMPLING_ALG,remasking_temperature=$REMASKING_TEMPERATURE" \
         --tasks humaneval \
         --num_fewshot 0 \
-        --batch_size 64 \
-        --output_path evals_results/big_hyperparameter_search_fixing_bug_p2_no_hidden_states_430 \
+        --batch_size 4 \
+        --output_path evals_results/big_hyperparameter_search_fixing_bug_p2_no_hidden_states_4step_denoising_430 \
         --log_samples \
         --seed 430 \
         --confirm_run_unsafe_code
