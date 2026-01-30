@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 import wandb
 from tqdm import trange
 
@@ -29,6 +30,100 @@ from veomni.utils.dist_utils import all_reduce
 
 
 logger = helper.create_logger(__name__)
+
+
+def partial_denoise_with_model(
+    model,
+    micro_batch: dict,
+    mask_token_id: int,
+    denoise_alpha: float,
+    temperature: float,
+) -> dict:
+    """
+    Two-pass partial denoising using model predictions with differentiable sampling.
+    
+    Uses Gumbel-Softmax trick to enable gradient flow through the sampling process.
+    Returns inputs_embeds (soft embeddings) instead of input_ids for full differentiability.
+    
+    Args:
+        model: The model to use for predictions
+        micro_batch: Dict containing input_ids, labels, mask_ratio, etc.
+        mask_token_id: Token ID used for masking
+        denoise_alpha: Ratio of masks to unmask using predictions (0.0-1.0)
+        temperature: Temperature for Gumbel-Softmax sampling
+    
+    Returns:
+        Modified micro_batch with inputs_embeds (gradients flow through sampling)
+    """
+    input_ids = micro_batch["input_ids"]  # x_t
+    batch_size, seq_len = input_ids.shape
+    device = input_ids.device
+    
+    # Get embedding layer and matrix
+    embedding_layer = model.get_input_embeddings()
+    embedding_matrix = embedding_layer.weight  # (vocab_size, hidden_dim)
+    
+    # Get original mask positions (where x_t has mask tokens)
+    original_mask_positions = (input_ids == mask_token_id)
+    
+    # First pass: get predictions for all positions
+    outputs = model(
+        input_ids=input_ids,
+        attention_mask=micro_batch.get("attention_mask"),
+        position_ids=micro_batch.get("position_ids"),
+        use_cache=False,
+    )
+    logits = outputs.logits  # (batch, seq, vocab)
+    
+    # Get original embeddings for all positions (no gradients needed here)
+    with torch.no_grad():
+        original_embeds = embedding_layer(input_ids)  # (batch, seq, hidden_dim)
+    
+    # Compute soft embeddings using Gumbel-Softmax for differentiable sampling
+    if temperature > 0:
+        # Gumbel-Softmax with straight-through estimator
+        # Forward: one-hot, Backward: gradients flow through soft version
+        gumbel_output = F.gumbel_softmax(logits, tau=temperature, hard=True)  # (batch, seq, vocab)
+    else:
+        # Deterministic argmax with straight-through gradient
+        indices = logits.argmax(dim=-1)
+        one_hot = F.one_hot(indices, num_classes=logits.shape[-1]).float()
+        # Straight-through: one_hot in forward, softmax gradients in backward
+        soft = F.softmax(logits, dim=-1)
+        gumbel_output = one_hot + soft - soft.detach()
+    
+    # Soft embeddings from Gumbel-Softmax output: (batch, seq, vocab) @ (vocab, hidden) -> (batch, seq, hidden)
+    soft_embeds = torch.matmul(gumbel_output, embedding_matrix)
+    
+    # Create mask for positions to unmask (replace with soft embeddings)
+    unmask_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=device)
+    
+    for b in range(batch_size):
+        mask_positions_b = original_mask_positions[b]
+        num_masked = mask_positions_b.sum().item()
+        
+        if num_masked > 0:
+            num_to_unmask = int(num_masked * denoise_alpha)
+            
+            if num_to_unmask > 0:
+                masked_indices = torch.where(mask_positions_b)[0]
+                perm = torch.randperm(num_masked, device=device)
+                indices_to_unmask = masked_indices[perm[:num_to_unmask]]
+                unmask_mask[b, indices_to_unmask] = True
+    
+    # Create final embeddings: use soft_embeds where unmasking, original elsewhere
+    # unmask_mask: (batch, seq) -> (batch, seq, 1) for broadcasting
+    unmask_mask_expanded = unmask_mask.unsqueeze(-1)
+    
+    # inputs_embeds = original * (1 - mask) + soft * mask
+    # Gradients flow through soft_embeds -> gumbel_output -> logits -> model weights
+    inputs_embeds = torch.where(unmask_mask_expanded, soft_embeds, original_embeds)
+    
+    # Update micro_batch: replace input_ids with inputs_embeds
+    del micro_batch["input_ids"]
+    micro_batch["inputs_embeds"] = inputs_embeds
+    
+    return micro_batch
 
 
 @dataclass
@@ -117,7 +212,6 @@ def main():
             enable_masking=args.train.enable_masking,
             mask_token_id=tokenizer.mask_token_id,
             mask_to_random_ratio=args.train.mask_to_random_ratio,
-            denoise_alpha=args.train.denoise_alpha,
             vocab_size=len(tokenizer),
             bsz_warmup_ratio=args.train.bsz_warmup_ratio,
             bsz_warmup_init_mbtoken=args.train.bsz_warmup_init_mbtoken,
@@ -273,6 +367,17 @@ def main():
                 micro_batch = {
                     k: v.cuda(non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in micro_batch.items()
                 }
+                
+                # Two-pass partial denoising: x_t -> model -> x_0_pred -> x_s -> model -> loss
+                if args.train.denoise_alpha > 0:
+                    micro_batch = partial_denoise_with_model(
+                        model=model,
+                        micro_batch=micro_batch,
+                        mask_token_id=tokenizer.mask_token_id,
+                        denoise_alpha=args.train.denoise_alpha,
+                        temperature=args.train.denoise_sampling_temperature,
+                    )
+                
                 with model_fwd_context:
                     loss: "torch.Tensor" = model(**micro_batch, use_cache=False).loss.mean() / len(micro_batches)
                 # print(f"Loss value: {loss.item()}")

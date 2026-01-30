@@ -251,8 +251,12 @@ class TrainingArguments:
         metadata={"help": "Ratio of mask tokens to substitute with random vocabulary tokens (0.0-1.0)."},
     )
     denoise_alpha: float = field(
+        default=0.0,
+        metadata={"help": "Ratio of mask tokens to unmask using model predictions (0.0-1.0). Set > 0 to enable two-pass denoising."},
+    )
+    denoise_sampling_temperature: float = field(
         default=1.0,
-        metadata={"help": "Partial denoising factor. x_s has (alpha * t) mask ratio. Set < 1.0 to enable."},
+        metadata={"help": "Temperature for sampling x_0_pred during partial denoising."},
     )
     dyn_bsz: bool = field(
         default=True,

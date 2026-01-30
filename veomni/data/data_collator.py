@@ -144,66 +144,31 @@ class DataCollatorWithPositionIDs(DataCollator):
 @dataclass
 class DataCollatorWithPositionIDsMasking(DataCollator):
     """
-    Data collator with masking and optional corruption modes:
-    - Random token substitution: replace some masks with random tokens
-    - Partial denoising: unmask some positions (x_t -> x_s where s = alpha * t)
-    These modes are mutually exclusive.
+    Data collator with masking and optional random token substitution.
+    
+    Note: Partial denoising (denoise_alpha < 1.0) is handled in the training loop
+    since it requires model predictions.
     """
     def __init__(
         self,
         mask_token_id: int,
         mask_to_random_ratio: float = 0.0,
-        denoise_alpha: float = 1.0,
         vocab_size: int = None,
     ):
         self.mask_token_id = mask_token_id
         self.mask_to_random_ratio = mask_to_random_ratio
-        self.denoise_alpha = denoise_alpha
         self.vocab_size = vocab_size
         # Minimum token ID to sample from (exclude special tokens 0-255)
         self.min_random_token_id = 256
 
-    def _partial_denoise(
-        self,
-        input_ids: "torch.Tensor",
-        original_ids: "torch.Tensor",
-        mask_positions: "torch.Tensor",
-    ) -> "torch.Tensor":
-        """
-        Partially denoise by unmasking some masked positions.
-        
-        Args:
-            input_ids: Tensor with masked tokens (x_t)
-            original_ids: Original token IDs before masking
-            mask_positions: Boolean tensor of masked positions
-        
-        Returns:
-            input_ids: Partially denoised tensor (x_s with s = alpha * t)
-        """
-        # Calculate how many masks to unmask
-        num_masked = mask_positions.sum().item()
-        num_to_keep_masked = int(num_masked * self.denoise_alpha)
-        num_to_unmask = num_masked - num_to_keep_masked
-        
-        if num_to_unmask > 0:
-            # Get indices of masked positions
-            masked_indices = torch.where(mask_positions)[0]
-            # Randomly select positions to unmask
-            perm = torch.randperm(num_masked, device=input_ids.device)
-            indices_to_unmask = masked_indices[perm[:num_to_unmask]]
-            # Replace mask tokens with original tokens
-            input_ids[indices_to_unmask] = original_ids[indices_to_unmask]
-        
-        return input_ids
-
     def _random_masking(self, input_ids: "torch.Tensor", labels: "torch.Tensor") -> Tuple["torch.Tensor", "torch.Tensor", "torch.Tensor"]:
         """
-        Randomly mask input_ids and optionally apply corruption (random tokens or partial denoising).
+        Randomly mask input_ids and optionally substitute some masks with random tokens.
         
         Returns:
-            input_ids: Tensor with masked (and optionally corrupted) tokens
+            input_ids: Tensor with masked (and optionally random-substituted) tokens (x_t)
             mask_ratio: The ratio of tokens that were masked
-            original_mask_positions: Boolean tensor indicating originally masked positions (x_t)
+            original_mask_positions: Boolean tensor indicating masked positions in x_t
         """
         old_input_ids = input_ids.clone()
         mask_ratio = torch.rand(1, device=input_ids.device).clamp(1/500, 1-1/500)
@@ -215,15 +180,11 @@ class DataCollatorWithPositionIDsMasking(DataCollator):
         input_ids[labels == IGNORE_INDEX] = old_input_ids[labels == IGNORE_INDEX]
         
         # Track original mask positions (positions that were masked in x_t)
-        # This is used for loss computation regardless of corruption mode
+        # This is used for loss computation
         original_mask_positions = (input_ids == self.mask_token_id)
         
-        # Apply corruption mode (mutually exclusive)
-        if self.denoise_alpha < 1.0:
-            # Partial denoising: x_t -> x_s (unmask some positions)
-            input_ids = self._partial_denoise(input_ids, old_input_ids, original_mask_positions)
-        elif self.mask_to_random_ratio > 0 and self.vocab_size is not None:
-            # Random token substitution: replace some masks with random tokens
+        # Random token substitution: replace some masks with random tokens
+        if self.mask_to_random_ratio > 0 and self.vocab_size is not None:
             random_sub_candidates = torch.rand_like(input_ids.float()) < self.mask_to_random_ratio
             positions_to_randomize = original_mask_positions & random_sub_candidates
             

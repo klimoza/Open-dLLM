@@ -15,7 +15,7 @@ data:
   num_workers: 2
 
 train:
-  output_dir: logs/fredzzp/open_dcoder_0.5B_ft_mask_to_random_0.1
+  output_dir: logs/fredzzp/open_dcoder_0.5B_ft_denoising_alpha0.1_temp1.0_lr5e-5
   data_parallel_mode: ddp
   ulysses_parallel_size: 1
   global_batch_size: 512
@@ -27,9 +27,9 @@ train:
   dyn_bsz_margin: 0
   dyn_bsz_buffer_size: 100
   optimizer: adamw
-  lr: 3.0e-4 # 2e-5
+  lr: 5e-5
   lr_decay_style: cosine
-  lr_warmup_ratio: 0.01
+  lr_warmup_ratio: 0.001
   lr_decay_ratio: 1.0  # Use full training for decay
   lr_min: 3e-6        # Minimum LR
   weight_decay: 0.01
@@ -44,9 +44,11 @@ train:
   empty_cache_steps: 1000
   ckpt_manager: bytecheckpoint
   load_checkpoint_path: ""
-  save_steps: 10_000
+  save_steps: 1000
   save_hf_weights: true
   wandb_project: open-dcoder-0.5B
-  wandb_name: open-dcoder-0.5B-ft-mask-to-random-0.1
+  wandb_name: open-dcoder-0.5B-ft-denoising-alpha0.1-temp1.0-lr5e-5
   use_wandb: true
-  mask_to_random_ratio: 0.1
+  mask_to_random_ratio: 0.0
+  denoise_alpha: 0.1
+  denoise_sampling_temperature: 1.0
