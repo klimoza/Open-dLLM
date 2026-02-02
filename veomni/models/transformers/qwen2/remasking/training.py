@@ -146,6 +146,25 @@ def train_epoch(
                     # But we want to ensure prompt positions have ground truth
                     x_0_full = x_0_pred.clone()
                     x_0_full[fix_mask] = ground_truth_ids[fix_mask]
+                    
+                    # Compute confidence for multi-step: run backbone on final x_0_full to get logits
+                    if config.use_confidence_conditioning:
+                        with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
+                            final_outputs = backbone(
+                                input_ids=x_0_full,
+                                attention_mask=attention_mask,
+                                is_causal=False,
+                            )
+                            final_logits = final_outputs.logits
+                            final_logits = torch.cat([final_logits[:, :1], final_logits[:, :-1]], dim=1)
+                            probs = torch.softmax(final_logits.float(), dim=-1)
+                            confidence_full = torch.gather(probs, -1, x_0_full.unsqueeze(-1)).squeeze(-1)
+                            # Prompt positions: set to 1.0
+                            for b in range(batch_size):
+                                prompt_len = prompt_lens[b].item()
+                                confidence_full[b, :prompt_len] = 1.0
+                    else:
+                        confidence_full = None
                 else:
                     # Single-step sampling (original behavior)
                     with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
@@ -170,6 +189,18 @@ def train_epoch(
                         # Build x_0_full: use predictions for masked positions, ground truth for unmasked
                         x_0_full = ground_truth_ids.clone()
                         x_0_full[mask_positions] = x_0_pred[mask_positions]
+                        
+                        # Compute confidence for all positions (p2-style: probability of token in x_0_full)
+                        # The backbone predicts logits for ALL positions, even unmasked ones
+                        if config.use_confidence_conditioning:
+                            probs = torch.softmax(backbone_logits.float(), dim=-1)
+                            confidence_full = torch.gather(probs, -1, x_0_full.unsqueeze(-1)).squeeze(-1)
+                            # Prompt positions: set to 1.0 (not in backbone's prediction scope)
+                            for b in range(batch_size):
+                                prompt_len = prompt_lens[b].item()
+                                confidence_full[b, :prompt_len] = 1.0
+                        else:
+                            confidence_full = None
                 
                 # Apply augmentations (random/repeat corruption) to completion tokens
                 # We need to do this per-sample since completion lengths vary
@@ -206,10 +237,15 @@ def train_epoch(
             
             # Forward pass through remasker with x_0_full and hidden_states from x_t
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
+                # Create timestep tensor for time conditioning (if enabled)
+                timestep_tensor = torch.full((batch_size,), t, device=config.device) if config.use_time_conditioning else None
+                
                 logits = model(
                     x_0=x_0_full,
                     hidden_states=hidden_states,
                     attention_mask=attention_mask.float(),
+                    timestep=timestep_tensor,
+                    confidence=confidence_full,
                 )
                 
                 # Get masked logits and labels
@@ -263,11 +299,15 @@ def train_epoch(
                 hidden_states = None
             
             # Forward pass through remasker
+            # Note: timestep and confidence are None for corruption-based training (no denoising process)
+            # If use_time_conditioning=True or use_confidence_conditioning=True, this will raise an error
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
                 logits = model(
                     x_0=input_ids,
                     hidden_states=hidden_states,
                     attention_mask=attention_mask.float(),
+                    timestep=None,
+                    confidence=None,
                 )
                 
                 # Get masked logits and labels
@@ -400,10 +440,13 @@ def evaluate(
                 hidden_states = None
             
             # Forward pass through remasker
+            # Note: timestep and confidence are None for evaluation (corruption-based)
             logits = model(
                 x_0=input_ids,
                 hidden_states=hidden_states,
                 attention_mask=attention_mask.float(),
+                timestep=None,
+                confidence=None,
             )
             
             # BCE loss
@@ -425,4 +468,3 @@ def evaluate(
     accuracy = total_correct / total_samples if total_samples > 0 else 0.0
     
     return {"eval_loss": avg_loss, "eval_accuracy": accuracy}
-

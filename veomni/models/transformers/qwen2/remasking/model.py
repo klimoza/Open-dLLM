@@ -2,12 +2,148 @@
 
 """Remasker model for predicting token correctness."""
 
+import math
 from typing import Optional
 
 import torch
 import torch.nn as nn
 
 from .config import RemaskerConfig
+
+
+def get_timestep_embedding(timesteps: torch.Tensor, embedding_dim: int) -> torch.Tensor:
+    """
+    Create sinusoidal timestep embeddings (DDPM-style).
+    
+    Args:
+        timesteps: Tensor of shape [B] containing timestep values (typically in [0, 1])
+        embedding_dim: Dimension of the output embedding
+    
+    Returns:
+        Embeddings of shape [B, embedding_dim]
+    """
+    assert len(timesteps.shape) == 1, "timesteps must be 1D tensor"
+    
+    half_dim = embedding_dim // 2
+    emb_scale = math.log(10000) / (half_dim - 1)
+    emb = torch.exp(torch.arange(half_dim, device=timesteps.device, dtype=torch.float32) * -emb_scale)
+    emb = timesteps[:, None].float() * emb[None, :]
+    emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+    
+    # Handle odd embedding dimensions
+    if embedding_dim % 2 == 1:
+        emb = torch.nn.functional.pad(emb, (0, 1))
+    
+    return emb
+
+
+class TimestepFiLM(nn.Module):
+    """
+    FiLM (Feature-wise Linear Modulation) conditioning from timestep.
+    
+    Predicts scale (γ) and shift (β) from timestep to modulate features:
+        output = γ * LayerNorm(x) + β
+    
+    Initialized so that γ=1 and β=0, meaning the output starts as identity.
+    """
+    
+    def __init__(self, hidden_size: int, frequency_embedding_size: int = 256, eps: float = 1e-6):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.frequency_embedding_size = frequency_embedding_size
+        
+        # MLP to predict scale and shift (2 * hidden_size output)
+        self.mlp = nn.Sequential(
+            nn.Linear(frequency_embedding_size, hidden_size),
+            nn.SiLU(),
+            nn.Linear(hidden_size, hidden_size * 2),  # [scale, shift]
+        )
+        
+        # Layer norm for the input features
+        self.norm = nn.LayerNorm(hidden_size, eps=eps)
+        
+        # Initialize final layer to zero so scale=1, shift=0 at start
+        nn.init.zeros_(self.mlp[-1].weight)
+        nn.init.zeros_(self.mlp[-1].bias)
+    
+    def forward(self, x: torch.Tensor, timesteps: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Input features [B, L, hidden_size]
+            timesteps: Tensor of shape [B] containing timestep values
+        
+        Returns:
+            Modulated features [B, L, hidden_size]
+        """
+        # Get FiLM parameters from timestep
+        t_freq = get_timestep_embedding(timesteps, self.frequency_embedding_size)
+        film_params = self.mlp(t_freq)  # [B, hidden_size * 2]
+        
+        # Split into scale and shift
+        scale, shift = film_params.chunk(2, dim=-1)  # [B, hidden_size] each
+        
+        # scale starts at 0, we add 1 so it starts at 1 (identity)
+        scale = 1 + scale
+        
+        # Broadcast over sequence length: [B, hidden_size] -> [B, 1, hidden_size]
+        scale = scale.unsqueeze(1)
+        shift = shift.unsqueeze(1)
+        
+        # Apply FiLM: γ * LayerNorm(x) + β
+        x_norm = self.norm(x)
+        return scale * x_norm + shift
+
+
+class ConfidenceFiLM(nn.Module):
+    """
+    FiLM (Feature-wise Linear Modulation) conditioning from confidence scores.
+    
+    Predicts per-token scale (γ) and shift (β) from confidence to modulate features:
+        output = γ * LayerNorm(x) + β
+    
+    Initialized so that γ=1 and β=0, meaning the output starts as identity.
+    """
+    
+    def __init__(self, hidden_size: int, eps: float = 1e-6):
+        super().__init__()
+        self.hidden_size = hidden_size
+        
+        # MLP to predict scale and shift (2 * hidden_size output)
+        self.mlp = nn.Sequential(
+            nn.Linear(1, hidden_size),
+            nn.SiLU(),
+            nn.Linear(hidden_size, hidden_size * 2),  # [scale, shift]
+        )
+        
+        # Layer norm for the input features
+        self.norm = nn.LayerNorm(hidden_size, eps=eps)
+        
+        # Initialize final layer to zero so scale=1, shift=0 at start
+        nn.init.zeros_(self.mlp[-1].weight)
+        nn.init.zeros_(self.mlp[-1].bias)
+    
+    def forward(self, x: torch.Tensor, confidence: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Input features [B, L, hidden_size]
+            confidence: Tensor of shape [B, L] containing confidence values (0 to 1)
+        
+        Returns:
+            Modulated features [B, L, hidden_size]
+        """
+        # Get FiLM parameters from confidence
+        # confidence: [B, L] -> [B, L, 1]
+        film_params = self.mlp(confidence.unsqueeze(-1))  # [B, L, hidden_size * 2]
+        
+        # Split into scale and shift
+        scale, shift = film_params.chunk(2, dim=-1)  # [B, L, hidden_size] each
+        
+        # scale starts at 0, we add 1 so it starts at 1 (identity)
+        scale = 1 + scale
+        
+        # Apply FiLM: γ * LayerNorm(x) + β
+        x_norm = self.norm(x)
+        return scale * x_norm + shift
 
 
 class Remasker(nn.Module):
@@ -68,6 +204,18 @@ class Remasker(nn.Module):
         # Binary classification head (outputs 1 logit per token)
         self.classifier = nn.Linear(config.hidden_size, 1)
         
+        # Time conditioning via FiLM (optional)
+        if config.use_time_conditioning:
+            self.time_film = TimestepFiLM(config.hidden_size, eps=config.rms_norm_eps)
+        else:
+            self.time_film = None
+        
+        # Confidence conditioning via FiLM (optional)
+        if config.use_confidence_conditioning:
+            self.confidence_film = ConfidenceFiLM(config.hidden_size, eps=config.rms_norm_eps)
+        else:
+            self.confidence_film = None
+        
         # Initialize weights
         self._init_weights()
     
@@ -86,6 +234,8 @@ class Remasker(nn.Module):
         x_0: torch.LongTensor,
         hidden_states: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        timestep: Optional[torch.Tensor] = None,
+        confidence: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Forward pass of the remasker.
@@ -95,6 +245,8 @@ class Remasker(nn.Module):
             hidden_states: Hidden states from backbone [B, L, backbone_hidden_size]
                           (optional if use_hidden_states=False in config)
             attention_mask: Optional attention mask [B, L]
+            timestep: Timestep/noise level [B] (optional if use_time_conditioning=False in config)
+            confidence: Backbone prediction confidence [B, L] (optional if use_confidence_conditioning=False)
         
         Returns:
             correctness_logits: Logits indicating token correctness [B, L]
@@ -117,6 +269,20 @@ class Remasker(nn.Module):
         else:
             # Use only token embeddings (no hidden state conditioning)
             hidden = token_embeds
+        
+        # Apply time conditioning via FiLM if enabled
+        if self.config.use_time_conditioning:
+            if timestep is None:
+                raise ValueError("timestep must be provided when use_time_conditioning=True")
+            # Apply FiLM: γ * LayerNorm(hidden) + β, where γ and β depend on timestep
+            hidden = self.time_film(hidden, timestep)  # [B, L, hidden_size]
+        
+        # Apply confidence conditioning via FiLM if enabled
+        if self.config.use_confidence_conditioning:
+            if confidence is None:
+                raise ValueError("confidence must be provided when use_confidence_conditioning=True")
+            # Apply FiLM: γ * LayerNorm(hidden) + β, where γ and β depend on confidence
+            hidden = self.confidence_film(hidden, confidence)  # [B, L, hidden_size]
         
         # Create position ids
         position_ids = torch.arange(seq_len, device=device).unsqueeze(0).expand(batch_size, -1)

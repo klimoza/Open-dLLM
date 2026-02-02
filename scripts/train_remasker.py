@@ -116,9 +116,11 @@ def main(config: RemaskerTrainingConfig):
         vocab_size=backbone_config.vocab_size,
         backbone_hidden_size=backbone_config.hidden_size,
         use_hidden_states=config.use_hidden_states,
+        use_time_conditioning=config.use_time_conditioning,
+        use_confidence_conditioning=config.use_confidence_conditioning,
     )
     
-    print(f"Creating remasker with {config.remasker_num_layers} layers (use_hidden_states={config.use_hidden_states})...")
+    print(f"Creating remasker with {config.remasker_num_layers} layers (use_hidden_states={config.use_hidden_states}, use_time_conditioning={config.use_time_conditioning}, use_confidence_conditioning={config.use_confidence_conditioning})...")
     
     if config.init_from_backbone:
         # Calculate layer offset (default: use last N layers from backbone)
@@ -227,6 +229,10 @@ def main(config: RemaskerTrainingConfig):
     if config.use_denoising_training:
         print(f"Denoising training: t_on={config.denoising_t_on}, t_off={config.denoising_t_off}, "
               f"temperature={config.denoising_temperature}, num_steps={config.denoising_num_steps}")
+    if config.use_time_conditioning:
+        print("Time conditioning: enabled (remasker will receive noise level as input)")
+    if config.use_confidence_conditioning:
+        print("Confidence conditioning: enabled (remasker will receive backbone confidence as input)")
     
     for epoch in range(config.epochs):
         # Train
@@ -320,6 +326,12 @@ if __name__ == "__main__":
     parser.add_argument("--denoising_temperature", type=float, default=0.0, help="Temperature for sampling x_0 from logits (0 = greedy)")
     parser.add_argument("--denoising_num_steps", type=int, default=4, help="Number of denoising steps (1 = single-step, >1 = multi-step entropy-based)")
     
+    # Time conditioning
+    parser.add_argument("--use_time_conditioning", action="store_true", help="Enable time conditioning in the remasker model (condition on noise level)")
+    
+    # Confidence conditioning
+    parser.add_argument("--use_confidence_conditioning", action="store_true", help="Enable confidence conditioning (condition on backbone prediction confidence)")
+    
     # Other
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=4)
@@ -371,6 +383,8 @@ if __name__ == "__main__":
         denoising_t_off=args.denoising_t_off,
         denoising_temperature=args.denoising_temperature,
         denoising_num_steps=args.denoising_num_steps,
+        use_time_conditioning=args.use_time_conditioning,
+        use_confidence_conditioning=args.use_confidence_conditioning,
     )
     
     main(config)

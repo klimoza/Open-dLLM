@@ -71,6 +71,8 @@ def get_remasking_logits(
     hidden_states: torch.Tensor = None,
     remasker_model = None,
     attention_mask: torch.Tensor = None,
+    timestep: torch.Tensor = None,
+    confidence: torch.Tensor = None,
 ) -> torch.Tensor:
     """
     Generate logits for remasking selection.
@@ -92,6 +94,8 @@ def get_remasking_logits(
         hidden_states: Hidden states from backbone [B, L, D] (required for source="model")
         remasker_model: Trained Remasker model instance (required for source="model")
         attention_mask: Optional attention mask [B, L]
+        timestep: Timestep/noise level [B] (optional, for time-conditioned remasker models)
+        confidence: Backbone prediction confidence [B, L] (optional, for confidence-conditioned models)
     
     Returns:
         logits: Tensor of shape [B, L] with logits for selection.
@@ -117,6 +121,8 @@ def get_remasking_logits(
                 x_0=x_0,
                 hidden_states=hidden_states,
                 attention_mask=attention_mask,
+                timestep=timestep,
+                confidence=confidence,
             )
         
         # Ensure correct dtype
@@ -142,4 +148,3 @@ def get_remasking_logits(
     logits = logits.masked_fill(~candidate_mask, float('-inf'))
     
     return logits
-

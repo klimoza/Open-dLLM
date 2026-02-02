@@ -35,13 +35,20 @@ if tokenizer.mask_token is None:
 # prompt = """
 # Write a function in Python which merges two sorted lists into a single sorted list.
 # """
-# prompt = "\ndef count_up_to(n):\n    \"\"\"Implement a function that takes an non-negative integer and returns an array of the first n\n    integers that are prime numbers and less than n.\n    for example:\n    count_up_to(5) => [2,3]\n    count_up_to(11) => [2,3,5,7]\n    count_up_to(0) => []\n    count_up_to(20) => [2,3,5,7,11,13,17,19]\n    count_up_to(1) => []\n    count_up_to(18) => [2,3,5,7,11,13,17]\n    \"\"\"\n"
-prompt = "def factorial(n):\n    \"\"\"Return the factorial of a non-negative integer.\"\"\"\n"
+prompt = "\ndef count_up_to(n):\n    \"\"\"Implement a function that takes an non-negative integer and returns an array of the first n\n    integers that are prime numbers and less than n.\n    for example:\n    count_up_to(5) => [2,3]\n    count_up_to(11) => [2,3,5,7]\n    count_up_to(0) => []\n    count_up_to(20) => [2,3,5,7,11,13,17,19]\n    count_up_to(1) => []\n    count_up_to(18) => [2,3,5,7,11,13,17]\n    \"\"\"\n"
+# prompt = "def factorial(n):\n    \"\"\"Return the factorial of a non-negative integer.\"\"\"\n"
 
 input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
 
-max_new_tokens = 64
+max_new_tokens = 128
 steps = 64
+
+# remasking_checkpoint_path = "/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_from_backbone-denoising-t0.2-t0.1-temp0.0/step_45000"
+
+# remasking_checkpoint_path = "/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_from_backbone-denoising-t0.2-t0.1-temp0.0/step_30000"
+
+remasking_checkpoint_path = "/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0/step_3000"
+
 
 # Create a generation configuration object
 generation_config = MDMGenerationConfig(
@@ -50,20 +57,20 @@ generation_config = MDMGenerationConfig(
     eos_token_id=tokenizer.eos_token_id,
     max_new_tokens=max_new_tokens,
     steps=steps,
-    temperature=0.1,
+    temperature=0.0,
     top_k=200,
     alg='remasking',
-    alg_temp=0.5,
+    alg_temp=0.0,
     num_return_sequences=10,
     return_dict_in_generate=True,
     output_history=True,
     remasking_config=RemaskingConfig(
         schedule="linear",
-        remasking_t_on=0.4,
-        remasking_t_off=0.1,
+        remasking_t_on=1.0,
+        remasking_t_off=0.0,
         remasking_alpha_on=0.9,
         remasking_logits_source="model",
-        remasker_checkpoint_path="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_from_backbone-denoising-t0.2-t0.1-temp0.0/step_30000",
+        remasker_checkpoint_path=remasking_checkpoint_path,
         non_remasking_sampling_algorithm="entropy",
         remasking_temperature=0.0,
     )

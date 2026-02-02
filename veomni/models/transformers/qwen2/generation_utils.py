@@ -394,6 +394,13 @@ class MDMGenerationMixin:
                     x0_full = x.clone()
                     x0_full[mask_index] = x0
                     
+                    # Compute confidence for ALL positions (p2-style) for confidence-conditioned remasker
+                    # confidence_full: probability backbone assigns to the token at each position in x0_full
+                    probs_full = torch.softmax(logits.float(), dim=-1)
+                    confidence_full = torch.gather(probs_full, -1, x0_full.unsqueeze(-1)).squeeze(-1)
+                    # Prompt positions (fix_mask): set to 1.0 (ground truth, not in backbone's prediction scope)
+                    confidence_full[fix_mask] = 1.0
+                    
                     # Load remasker model if using model-based remasking (lazy loading)
                     if remasking_cfg.remasking_logits_source == "model":
                         if remasking_cfg._remasker_model is None:
@@ -440,6 +447,8 @@ class MDMGenerationMixin:
                         hidden_states=hidden_states,
                         remasker_model=remasker_model,
                         attention_mask=gen_attention_mask.float() if gen_attention_mask is not None else None,
+                        timestep=t.expand(x.size(0)),  # Pass current timestep for time conditioning
+                        confidence=confidence_full,  # Pass backbone confidence for confidence conditioning
                     )
                     
                     # Sample which positions to unmask using Gumbel trick
@@ -619,6 +628,22 @@ class MDMGenerationMixin:
             else:
                 raise NotImplementedError(f"Algorithm {alg} not implemented.")
 
+            if histories is not None:
+                histories.append(x.clone())
+
+        # Final cleanup: unmask any remaining mask tokens after all steps
+        remaining_mask = (x == mask_token_id)
+        if remaining_mask.any():
+            # Forward pass to get logits for remaining masks
+            outputs = self(input_ids=x, attention_mask=gen_attention_mask, is_causal=False)
+            logits = outputs.logits
+            logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)
+            
+            # Sample tokens for remaining masks (use greedy to ensure clean output)
+            mask_logits = logits[remaining_mask]
+            _, sampled_tokens = sample_tokens(mask_logits, temperature=temperature, top_p=top_p, top_k=top_k, alg="origin")
+            x[remaining_mask] = sampled_tokens
+            
             if histories is not None:
                 histories.append(x.clone())
 

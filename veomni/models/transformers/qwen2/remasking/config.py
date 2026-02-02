@@ -21,6 +21,8 @@ class RemaskerConfig:
     vocab_size: int = 151936
     backbone_hidden_size: int = 896  # Hidden size of the backbone model
     use_hidden_states: bool = True  # Whether to condition on backbone hidden states
+    use_time_conditioning: bool = False  # Whether to condition on timestep (noise level)
+    use_confidence_conditioning: bool = False  # Whether to condition on backbone prediction confidence
     
     # Attention settings
     attention_dropout: float = 0.0
@@ -64,6 +66,8 @@ class RemaskerConfig:
             "vocab_size": self.vocab_size,
             "backbone_hidden_size": self.backbone_hidden_size,
             "use_hidden_states": self.use_hidden_states,
+            "use_time_conditioning": self.use_time_conditioning,
+            "use_confidence_conditioning": self.use_confidence_conditioning,
             "attention_dropout": self.attention_dropout,
             "hidden_act": self.hidden_act,
             "max_position_embeddings": self.max_position_embeddings,
@@ -98,6 +102,8 @@ class RemaskerTrainingConfig:
     init_from_backbone: bool = False  # Initialize remasker layers from backbone
     init_layer_offset: int = -1  # Which backbone layer to start from (-1 = auto: use last N layers)
     use_hidden_states: bool = True  # Whether to condition remasker on backbone hidden states
+    use_time_conditioning: bool = False  # Whether to condition remasker on timestep (noise level)
+    use_confidence_conditioning: bool = False  # Whether to condition remasker on backbone prediction confidence
     
     # Corruption settings
     random_corruption_ratio: float = 0.1  # a% of tokens changed to random
