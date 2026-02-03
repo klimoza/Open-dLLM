@@ -146,6 +146,121 @@ class ConfidenceFiLM(nn.Module):
         return scale * x_norm + shift
 
 
+class CrossAttention(nn.Module):
+    """
+    Cross-attention module for conditioning on x_t.
+    
+    Query comes from the main hidden states (x_0 processing),
+    Key/Value come from x_t embeddings.
+    
+    Initialized to be close to identity (residual connection dominates at start).
+    """
+    
+    def __init__(
+        self, 
+        hidden_size: int, 
+        num_attention_heads: int,
+        num_key_value_heads: int = None,
+        attention_dropout: float = 0.0,
+        eps: float = 1e-6
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_attention_heads = num_attention_heads
+        self.num_key_value_heads = num_key_value_heads or num_attention_heads
+        self.head_dim = hidden_size // num_attention_heads
+        self.num_key_value_groups = num_attention_heads // self.num_key_value_heads
+        self.scaling = self.head_dim ** -0.5
+        self.attention_dropout = attention_dropout
+        
+        # Query projection (from main hidden states)
+        self.q_proj = nn.Linear(hidden_size, num_attention_heads * self.head_dim, bias=True)
+        # Key and Value projections (from x_t embeddings)
+        self.k_proj = nn.Linear(hidden_size, self.num_key_value_heads * self.head_dim, bias=True)
+        self.v_proj = nn.Linear(hidden_size, self.num_key_value_heads * self.head_dim, bias=True)
+        # Output projection
+        self.o_proj = nn.Linear(num_attention_heads * self.head_dim, hidden_size, bias=False)
+        
+        # Layer norm before cross-attention
+        self.norm = nn.LayerNorm(hidden_size, eps=eps)
+        
+        # Initialize output projection to zero so cross-attention starts as identity
+        nn.init.zeros_(self.o_proj.weight)
+    
+    def _repeat_kv(self, hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+        """Repeat KV heads to match number of query heads."""
+        batch, num_kv_heads, seq_len, head_dim = hidden_states.shape
+        if n_rep == 1:
+            return hidden_states
+        hidden_states = hidden_states[:, :, None, :, :].expand(
+            batch, num_kv_heads, n_rep, seq_len, head_dim
+        )
+        return hidden_states.reshape(batch, num_kv_heads * n_rep, seq_len, head_dim)
+    
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        x_t_embeds: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Args:
+            hidden_states: Main hidden states [B, L, hidden_size] (query source)
+            x_t_embeds: Embedded x_t tokens [B, L, hidden_size] (key/value source)
+            attention_mask: Optional attention mask [B, L]
+        
+        Returns:
+            Output hidden states [B, L, hidden_size]
+        """
+        residual = hidden_states
+        hidden_states = self.norm(hidden_states)
+        
+        batch_size, seq_len, _ = hidden_states.shape
+        
+        # Project queries from main hidden states
+        query_states = self.q_proj(hidden_states)
+        query_states = query_states.view(batch_size, seq_len, self.num_attention_heads, self.head_dim)
+        query_states = query_states.transpose(1, 2)  # [B, num_heads, L, head_dim]
+        
+        # Project keys and values from x_t embeddings
+        key_states = self.k_proj(x_t_embeds)
+        key_states = key_states.view(batch_size, seq_len, self.num_key_value_heads, self.head_dim)
+        key_states = key_states.transpose(1, 2)  # [B, num_kv_heads, L, head_dim]
+        
+        value_states = self.v_proj(x_t_embeds)
+        value_states = value_states.view(batch_size, seq_len, self.num_key_value_heads, self.head_dim)
+        value_states = value_states.transpose(1, 2)  # [B, num_kv_heads, L, head_dim]
+        
+        # Repeat KV heads if needed (grouped-query attention)
+        key_states = self._repeat_kv(key_states, self.num_key_value_groups)
+        value_states = self._repeat_kv(value_states, self.num_key_value_groups)
+        
+        # Compute attention scores
+        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * self.scaling
+        
+        # Apply attention mask if provided
+        if attention_mask is not None:
+            # Expand mask for cross-attention: [B, L] -> [B, 1, 1, L]
+            cross_attn_mask = attention_mask[:, None, None, :].to(attn_weights.dtype)
+            cross_attn_mask = (1.0 - cross_attn_mask) * torch.finfo(attn_weights.dtype).min
+            attn_weights = attn_weights + cross_attn_mask
+        
+        # Softmax and dropout
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
+        
+        # Apply attention to values
+        attn_output = torch.matmul(attn_weights, value_states)  # [B, num_heads, L, head_dim]
+        
+        # Reshape and project output
+        attn_output = attn_output.transpose(1, 2).contiguous()  # [B, L, num_heads, head_dim]
+        attn_output = attn_output.reshape(batch_size, seq_len, self.hidden_size)
+        attn_output = self.o_proj(attn_output)
+        
+        # Residual connection
+        return residual + attn_output
+
+
 class Remasker(nn.Module):
     """
     Remasker model that predicts token correctness.
@@ -216,6 +331,21 @@ class Remasker(nn.Module):
         else:
             self.confidence_film = None
         
+        # x_t cross-attention conditioning (optional) - one per layer for richer conditioning
+        if config.use_x_t_conditioning:
+            self.x_t_cross_attns = nn.ModuleList([
+                CrossAttention(
+                    hidden_size=config.hidden_size,
+                    num_attention_heads=config.num_attention_heads,
+                    num_key_value_heads=config.num_key_value_heads,
+                    attention_dropout=config.attention_dropout,
+                    eps=config.rms_norm_eps,
+                )
+                for _ in range(config.num_layers)
+            ])
+        else:
+            self.x_t_cross_attns = None
+        
         # Initialize weights
         self._init_weights()
     
@@ -236,6 +366,7 @@ class Remasker(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         timestep: Optional[torch.Tensor] = None,
         confidence: Optional[torch.Tensor] = None,
+        x_t: Optional[torch.LongTensor] = None,
     ) -> torch.Tensor:
         """
         Forward pass of the remasker.
@@ -247,6 +378,7 @@ class Remasker(nn.Module):
             attention_mask: Optional attention mask [B, L]
             timestep: Timestep/noise level [B] (optional if use_time_conditioning=False in config)
             confidence: Backbone prediction confidence [B, L] (optional if use_confidence_conditioning=False)
+            x_t: Noisy/masked token ids [B, L] (optional if use_x_t_conditioning=False in config)
         
         Returns:
             correctness_logits: Logits indicating token correctness [B, L]
@@ -284,6 +416,14 @@ class Remasker(nn.Module):
             # Apply FiLM: γ * LayerNorm(hidden) + β, where γ and β depend on confidence
             hidden = self.confidence_film(hidden, confidence)  # [B, L, hidden_size]
         
+        # Embed x_t tokens if x_t conditioning is enabled (used for per-layer cross-attention)
+        x_t_embeds = None
+        if self.config.use_x_t_conditioning:
+            if x_t is None:
+                raise ValueError("x_t must be provided when use_x_t_conditioning=True")
+            # Embed x_t tokens (reuse token_embedding)
+            x_t_embeds = self.token_embedding(x_t)  # [B, L, hidden_size]
+        
         # Create position ids
         position_ids = torch.arange(seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
         
@@ -299,8 +439,9 @@ class Remasker(nn.Module):
             ).to(hidden.dtype)
             causal_mask = (1.0 - causal_mask) * torch.finfo(hidden.dtype).min
         
-        # Pass through decoder layers (bidirectional)
-        for layer in self.layers:
+        # Pass through decoder layers with per-layer cross-attention (bidirectional)
+        for layer_idx, layer in enumerate(self.layers):
+            # Self-attention layer
             layer_outputs = layer(
                 hidden,
                 attention_mask=causal_mask,
@@ -309,6 +450,10 @@ class Remasker(nn.Module):
                 is_causal=False,  # Bidirectional attention
             )
             hidden = layer_outputs[0]
+            
+            # Apply cross-attention to x_t after each self-attention layer
+            if self.config.use_x_t_conditioning:
+                hidden = self.x_t_cross_attns[layer_idx](hidden, x_t_embeds, attention_mask)
         
         # Final layer norm
         hidden = self.norm(hidden)

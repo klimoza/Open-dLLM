@@ -16,6 +16,7 @@ from .scheduling import compute_alpha, is_remasking_active
 from .sampling import sample_indices_gumbel, get_remasking_logits
 from .dataset import RemaskerDataset, collate_fn, load_data
 from .metrics import compute_classification_metrics
+from .logging import log_train_step, log_timestep_eval, evaluate_at_timesteps
 from .training import train_epoch, evaluate
 
 
@@ -59,6 +60,10 @@ __all__ = [
     "load_data",
     # Metrics
     "compute_classification_metrics",
+    # Logging
+    "log_train_step",
+    "log_timestep_eval",
+    "evaluate_at_timesteps",
     # Training
     "train_epoch",
     "evaluate",

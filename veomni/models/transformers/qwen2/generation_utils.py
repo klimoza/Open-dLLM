@@ -449,6 +449,7 @@ class MDMGenerationMixin:
                         attention_mask=gen_attention_mask.float() if gen_attention_mask is not None else None,
                         timestep=t.expand(x.size(0)),  # Pass current timestep for time conditioning
                         confidence=confidence_full,  # Pass backbone confidence for confidence conditioning
+                        x_t=x,  # Pass current masked sequence for x_t cross-attention conditioning
                     )
                     
                     # Sample which positions to unmask using Gumbel trick

@@ -282,7 +282,7 @@ def format_table(results, display_columns=None):
         format_table_ascii(results, display_columns)
 
 
-def print_summary_stats(results):
+def print_summary_stats(results, summary_csv_path=None):
     """Print summary statistics grouped by key hyperparameters."""
     if not results:
         return
@@ -328,21 +328,30 @@ def print_summary_stats(results):
     
     varying_params = [p for p in group_params if len(all_values[p]) > 1]
     
-    # Build summary rows
+    # Build summary rows (with separate mean/std columns for CSV)
     summary_rows = []
+    summary_rows_csv = []
     for key, group_results in sorted(groups.items()):
         row = dict(key)
+        row_csv = dict(key)
         for metric in metric_cols:
             values = [r.get(metric) for r in group_results if metric in r and r.get(metric) is not None]
             if values:
                 mean_val = sum(values) / len(values)
+                std_val = 0.0
                 if len(values) > 1:
                     std_val = (sum((v - mean_val) ** 2 for v in values) / len(values)) ** 0.5
                     row[metric] = f"{mean_val:.4f} ± {std_val:.4f}"
                 else:
                     row[metric] = f"{mean_val:.4f}"
                 row["n"] = len(values)
+                
+                # CSV version with separate columns
+                row_csv[f"{metric}_mean"] = mean_val
+                row_csv[f"{metric}_std"] = std_val
+                row_csv["n"] = len(values)
         summary_rows.append(row)
+        summary_rows_csv.append(row_csv)
     
     # Print as table - only show varying params + metrics
     display_cols = varying_params + metric_cols + ["n"]
@@ -375,6 +384,22 @@ def print_summary_stats(results):
         print(" | ".join(row_values))
     
     print(separator)
+    
+    # Export summary to CSV if requested
+    if summary_csv_path:
+        # Build CSV columns: varying params + metric_mean + metric_std + n
+        csv_cols = varying_params.copy()
+        for metric in metric_cols:
+            csv_cols.append(f"{metric}_mean")
+            csv_cols.append(f"{metric}_std")
+        csv_cols.append("n")
+        
+        with open(summary_csv_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=csv_cols, extrasaction='ignore')
+            writer.writeheader()
+            writer.writerows(summary_rows_csv)
+        
+        print(f"\nSummary exported to: {summary_csv_path}")
 
 
 def export_csv(results, output_file, columns=None):
@@ -405,11 +430,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python parse_results.py                                    # Default dir, ASCII table
+    python parse_results.py                                    # Default dir, exports summary.csv
     python parse_results.py evals_results/my_experiment        # Custom dir
-    python parse_results.py --csv results.csv                  # Export to CSV
+    python parse_results.py --csv results.csv                  # Also export detailed results to CSV
+    python parse_results.py --summary-csv custom.csv           # Custom summary CSV filename
     python parse_results.py --sort humaneval_pass@1            # Sort by metric (descending)
-    python parse_results.py --no-summary                       # Skip summary statistics
+    python parse_results.py --no-summary                       # Skip summary stats and CSV
         """
     )
     parser.add_argument(
@@ -421,7 +447,15 @@ Examples:
     parser.add_argument(
         "--csv", 
         metavar="FILE",
-        help="Export results to CSV file"
+        help="Export detailed results to CSV file"
+    )
+    parser.add_argument(
+        "--summary-csv", 
+        metavar="FILE",
+        nargs="?",
+        const="summary.csv",
+        default="summary.csv",
+        help="Export summary statistics (averaged over seeds) to CSV file (default: summary.csv)"
     )
     parser.add_argument(
         "--sort", 
@@ -484,9 +518,9 @@ Examples:
     print("=" * 60)
     format_table(results)
     
-    # Print summary statistics
+    # Print summary statistics (and export CSV unless --no-summary)
     if not args.no_summary:
-        print_summary_stats(results)
+        print_summary_stats(results, summary_csv_path=args.summary_csv)
     
     return 0
 

@@ -10,14 +10,9 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
-try:
-    import wandb
-    WANDB_AVAILABLE = True
-except ImportError:
-    WANDB_AVAILABLE = False
-
 from .config import RemaskerTrainingConfig
 from .corruption import corrupt_completion, sample_tokens_from_logits, multi_step_denoise
+from .logging import log_train_step, log_timestep_eval, evaluate_at_timesteps
 from .metrics import compute_classification_metrics
 from .scheduling import compute_alpha
 
@@ -34,6 +29,7 @@ def train_epoch(
     save_path: str,
     mask_token_id: Optional[int] = None,
     tokenizer = None,
+    eval_dataloader = None,
 ) -> Tuple[float, int]:
     """Train for one epoch."""
     model.train()
@@ -202,50 +198,129 @@ def train_epoch(
                         else:
                             confidence_full = None
                 
-                # Apply augmentations (random/repeat corruption) to completion tokens
-                # We need to do this per-sample since completion lengths vary
-                augmentation_mask = torch.zeros_like(x_0_full, dtype=torch.bool)
-                
-                for b in range(batch_size):
-                    prompt_len = prompt_lens[b].item()
-                    actual_len = attention_mask[b].sum().item()
-                    completion_len = actual_len - prompt_len
-                    if completion_len <= 0:
-                        continue
+                # Double denoising scheme for x_t conditioning
+                if config.use_x_t_conditioning:
+                    # x_0_full is now pred_x_0 (first denoising step result)
+                    pred_x_0 = x_0_full.clone()
                     
-                    completion_slice = x_0_full[b, prompt_len:actual_len]
-                    corrupted_completion, corruption_mask = corrupt_completion(
-                        completion_slice,
-                        vocab_size=tokenizer.vocab_size if tokenizer else backbone.config.vocab_size,
-                        random_ratio=config.random_corruption_ratio,
-                        repeat_ratio=config.repeat_corruption_ratio,
-                        special_token_ids=special_token_ids,
-                    )
-                    x_0_full[b, prompt_len:actual_len] = corrupted_completion
-                    augmentation_mask[b, prompt_len:actual_len] = corruption_mask
-                
-                # Compute labels: 1 if matches ground truth AND not corrupted by augmentation
-                # For completion positions: correct if x_0_full == ground_truth AND not augmented
-                prediction_correct = (x_0_full == ground_truth_ids)
-                not_augmented = ~augmentation_mask
-                labels = (prediction_correct & not_augmented).float()
-                
-                # Prompt tokens are always labeled as correct (not used in loss anyway)
-                for b in range(batch_size):
-                    prompt_len = prompt_lens[b].item()
-                    labels[b, :prompt_len] = 1.0
+                    # Step 3: pred_x_0 -> pred_x_t (apply masking to pred_x_0)
+                    pred_x_t = pred_x_0.clone()
+                    pred_mask_positions = torch.zeros_like(pred_x_t, dtype=torch.bool)
+                    
+                    for b in range(batch_size):
+                        prompt_len = prompt_lens[b].item()
+                        completion_len = (attention_mask[b].sum().item()) - prompt_len
+                        if completion_len <= 0:
+                            continue
+                        
+                        # Apply same masking ratio to pred_x_0
+                        num_to_mask = int(completion_len * (1 - alpha))
+                        if num_to_mask > 0:
+                            perm = torch.randperm(completion_len, device=config.device)
+                            mask_indices = perm[:num_to_mask]
+                            pred_x_t[b, prompt_len + mask_indices] = mask_token_id
+                            pred_mask_positions[b, prompt_len + mask_indices] = True
+                    
+                    # Step 4: pred_x_t -> pred_pred_x_0 (denoise pred_x_t)
+                    with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
+                        pred_backbone_outputs = backbone(
+                            input_ids=pred_x_t,
+                            attention_mask=attention_mask,
+                            output_hidden_states=config.use_hidden_states,
+                            return_dict=True,
+                            is_causal=False,
+                        )
+                        pred_logits = pred_backbone_outputs.logits
+                        pred_logits = torch.cat([pred_logits[:, :1], pred_logits[:, :-1]], dim=1)
+                        
+                        # Sample pred_pred_x_0
+                        pred_pred_x_0 = sample_tokens_from_logits(
+                            pred_logits,
+                            temperature=config.denoising_temperature
+                        )
+                        
+                        # Build pred_pred_x_0_full: predictions for masked positions, keep unmasked from pred_x_0
+                        pred_pred_x_0_full = pred_x_0.clone()
+                        pred_pred_x_0_full[pred_mask_positions] = pred_pred_x_0[pred_mask_positions]
+                        
+                        # Update hidden_states to be from pred_x_t if using hidden states
+                        if config.use_hidden_states:
+                            hidden_states = pred_backbone_outputs.hidden_states[-1]
+                        
+                        # Compute confidence for pred_pred_x_0_full if confidence conditioning is enabled
+                        if config.use_confidence_conditioning:
+                            probs = torch.softmax(pred_logits.float(), dim=-1)
+                            confidence_full = torch.gather(probs, -1, pred_pred_x_0_full.unsqueeze(-1)).squeeze(-1)
+                            for b in range(batch_size):
+                                prompt_len = prompt_lens[b].item()
+                                confidence_full[b, :prompt_len] = 1.0
+                    
+                    # Now use pred_pred_x_0_full as the input to remasker, with pred_x_t as cross-attention context
+                    x_0_for_remasker = pred_pred_x_0_full
+                    x_t_for_remasker = pred_x_t
+                    
+                    # Labels: compare pred_pred_x_0_full to ground_truth
+                    # (we want remasker to identify which tokens are correct)
+                    prediction_correct = (x_0_for_remasker == ground_truth_ids)
+                    labels = prediction_correct.float()
+                    
+                    # Prompt tokens are always labeled as correct
+                    for b in range(batch_size):
+                        prompt_len = prompt_lens[b].item()
+                        labels[b, :prompt_len] = 1.0
+                else:
+                    # Standard single denoising scheme (no x_t conditioning)
+                    x_0_for_remasker = x_0_full
+                    x_t_for_remasker = None
+                    
+                    # Apply augmentations (random/repeat corruption) to completion tokens
+                    # We need to do this per-sample since completion lengths vary
+                    augmentation_mask = torch.zeros_like(x_0_full, dtype=torch.bool)
+                    
+                    for b in range(batch_size):
+                        prompt_len = prompt_lens[b].item()
+                        actual_len = attention_mask[b].sum().item()
+                        completion_len = actual_len - prompt_len
+                        if completion_len <= 0:
+                            continue
+                        
+                        completion_slice = x_0_full[b, prompt_len:actual_len]
+                        corrupted_completion, corruption_mask = corrupt_completion(
+                            completion_slice,
+                            vocab_size=tokenizer.vocab_size if tokenizer else backbone.config.vocab_size,
+                            random_ratio=config.random_corruption_ratio,
+                            repeat_ratio=config.repeat_corruption_ratio,
+                            special_token_ids=special_token_ids,
+                        )
+                        x_0_full[b, prompt_len:actual_len] = corrupted_completion
+                        augmentation_mask[b, prompt_len:actual_len] = corruption_mask
+                    
+                    # Compute labels: 1 if matches ground truth AND not corrupted by augmentation
+                    # For completion positions: correct if x_0_full == ground_truth AND not augmented
+                    prediction_correct = (x_0_full == ground_truth_ids)
+                    not_augmented = ~augmentation_mask
+                    labels = (prediction_correct & not_augmented).float()
+                    
+                    # Prompt tokens are always labeled as correct (not used in loss anyway)
+                    for b in range(batch_size):
+                        prompt_len = prompt_lens[b].item()
+                        labels[b, :prompt_len] = 1.0
+                    
+                    # Update x_0_for_remasker after augmentation
+                    x_0_for_remasker = x_0_full
             
-            # Forward pass through remasker with x_0_full and hidden_states from x_t
+            # Forward pass through remasker with x_0_for_remasker and optional x_t conditioning
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):
                 # Create timestep tensor for time conditioning (if enabled)
                 timestep_tensor = torch.full((batch_size,), t, device=config.device) if config.use_time_conditioning else None
                 
                 logits = model(
-                    x_0=x_0_full,
+                    x_0=x_0_for_remasker,
                     hidden_states=hidden_states,
                     attention_mask=attention_mask.float(),
                     timestep=timestep_tensor,
                     confidence=confidence_full,
+                    x_t=x_t_for_remasker,
                 )
                 
                 # Get masked logits and labels
@@ -375,20 +450,26 @@ def train_epoch(
                 print(f"\nSaved checkpoint to {step_save_path}")
             
             # Log to wandb with accumulated metrics
-            if config.use_wandb and WANDB_AVAILABLE:
-                avg_metrics = {k: v / accum_count for k, v in accum_metrics.items()}
-                wandb.log({
-                    "train/loss": loss.item() * config.gradient_accumulation_steps,
-                    "train/lr": scheduler.get_last_lr()[0],
-                    "train/grad_norm": accum_grad_norm,
-                    "train/positive_ratio": avg_metrics["positive_ratio"],
-                    "train/pred_positive_ratio": avg_metrics["pred_positive_ratio"],
-                    "train/pred_avg_prob": avg_metrics["pred_avg_prob"],
-                    "train/precision": avg_metrics["precision"],
-                    "train/recall": avg_metrics["recall"],
-                    "train/pos_weight": avg_metrics["pos_weight"],
-                    "global_step": global_step,
-                })
+            avg_metrics = {k: v / accum_count for k, v in accum_metrics.items()}
+            log_train_step(
+                loss=loss.item() * config.gradient_accumulation_steps,
+                lr=scheduler.get_last_lr()[0],
+                grad_norm=accum_grad_norm,
+                metrics=avg_metrics,
+                global_step=global_step,
+                use_wandb=config.use_wandb,
+            )
+            
+            # Timestep evaluation
+            if (config.eval_timesteps_every_n_steps > 0 and 
+                global_step % config.eval_timesteps_every_n_steps == 0 and
+                eval_dataloader is not None):
+                model.eval()
+                timestep_metrics = evaluate_at_timesteps(
+                    model, backbone, eval_dataloader, config, mask_token_id, tokenizer
+                )
+                model.train()
+                log_timestep_eval(timestep_metrics, global_step, config.use_wandb)
             
             # Reset accumulators
             accum_metrics = {"positive_ratio": 0.0, "pred_positive_ratio": 0.0, "pred_avg_prob": 0.0, "precision": 0.0, "recall": 0.0, "pos_weight": 0.0}

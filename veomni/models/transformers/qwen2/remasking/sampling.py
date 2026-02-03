@@ -73,6 +73,7 @@ def get_remasking_logits(
     attention_mask: torch.Tensor = None,
     timestep: torch.Tensor = None,
     confidence: torch.Tensor = None,
+    x_t: torch.Tensor = None,
 ) -> torch.Tensor:
     """
     Generate logits for remasking selection.
@@ -96,6 +97,7 @@ def get_remasking_logits(
         attention_mask: Optional attention mask [B, L]
         timestep: Timestep/noise level [B] (optional, for time-conditioned remasker models)
         confidence: Backbone prediction confidence [B, L] (optional, for confidence-conditioned models)
+        x_t: Noisy/masked token ids [B, L] (optional, for x_t-conditioned remasker models)
     
     Returns:
         logits: Tensor of shape [B, L] with logits for selection.
@@ -123,6 +125,7 @@ def get_remasking_logits(
                 attention_mask=attention_mask,
                 timestep=timestep,
                 confidence=confidence,
+                x_t=x_t,
             )
         
         # Ensure correct dtype

@@ -11,7 +11,7 @@ DENOISING_TEMP_STEPS=0.0
 DENOISING_NUM_STEPS=1
 LAYERS=12
 EFFECTIVE_BS=$((BS * GRAD_ACC))
-run_name="remasker-training-open-dcoder-0.5B-layers${LAYERS}-lr${LR}-eff_bs${EFFECTIVE_BS}-init_from_backbone-denoising-t${DENOISING_T_ON}-t${DENOISING_T_OFF}-no_hidden-time_cond-confidence_cond"
+run_name="remasker-training-open-dcoder-0.5B-layers${LAYERS}-lr${LR}-eff_bs${EFFECTIVE_BS}-init_from_backbone-denoising-t${DENOISING_T_ON}-t${DENOISING_T_OFF}-time_cond"
 
 CUDA_VISIBLE_DEVICES=0 python scripts/train_remasker.py \
     --backbone_path fredzzp/open-dcoder-0.5B \
@@ -25,7 +25,6 @@ CUDA_VISIBLE_DEVICES=0 python scripts/train_remasker.py \
     --wandb_project remasker-training \
     --wandb_run_name $run_name \
     --use_wandb \
-    --no_hidden_states \
     --random_corruption_ratio $RANDOM_CORRUPTION_RATIO \
     --repeat_corruption_ratio $REPEAT_CORRUPTION_RATIO \
     --label_smoothing_alpha $LABEL_SMOOTHING_ALPHA \
@@ -39,5 +38,7 @@ CUDA_VISIBLE_DEVICES=0 python scripts/train_remasker.py \
     --init_layer_offset 0 \
     --denoising_num_steps $DENOISING_NUM_STEPS \
     --denoising_temperature $DENOISING_TEMP_STEPS \
-    --use_time_conditioning \
-    --use_confidence_conditioning
+    --use_time_conditioning 
+    # --x_t_condition
+    # --use_time_conditioning \
+    # --use_confidence_conditioning \

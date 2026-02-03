@@ -23,6 +23,7 @@ class RemaskerConfig:
     use_hidden_states: bool = True  # Whether to condition on backbone hidden states
     use_time_conditioning: bool = False  # Whether to condition on timestep (noise level)
     use_confidence_conditioning: bool = False  # Whether to condition on backbone prediction confidence
+    use_x_t_conditioning: bool = False  # Whether to condition on x_t via cross-attention
     
     # Attention settings
     attention_dropout: float = 0.0
@@ -68,6 +69,7 @@ class RemaskerConfig:
             "use_hidden_states": self.use_hidden_states,
             "use_time_conditioning": self.use_time_conditioning,
             "use_confidence_conditioning": self.use_confidence_conditioning,
+            "use_x_t_conditioning": self.use_x_t_conditioning,
             "attention_dropout": self.attention_dropout,
             "hidden_act": self.hidden_act,
             "max_position_embeddings": self.max_position_embeddings,
@@ -101,9 +103,10 @@ class RemaskerTrainingConfig:
     # Remasker initialization from backbone
     init_from_backbone: bool = False  # Initialize remasker layers from backbone
     init_layer_offset: int = -1  # Which backbone layer to start from (-1 = auto: use last N layers)
-    use_hidden_states: bool = True  # Whether to condition remasker on backbone hidden states
+    use_hidden_states: bool = False  # Whether to condition remasker on backbone hidden states
     use_time_conditioning: bool = False  # Whether to condition remasker on timestep (noise level)
     use_confidence_conditioning: bool = False  # Whether to condition remasker on backbone prediction confidence
+    use_x_t_conditioning: bool = False  # Whether to condition on x_t via cross-attention (uses double denoising scheme)
     
     # Corruption settings
     random_corruption_ratio: float = 0.1  # a% of tokens changed to random
@@ -153,4 +156,8 @@ class RemaskerTrainingConfig:
     eval_ratio: float = 0.05  # Fraction of data for evaluation
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     fp16: bool = True
+    
+    # Timestep evaluation logging
+    eval_timesteps_every_n_steps: int = 100  # Evaluate at fixed timesteps every N optimization steps
+    eval_timesteps_num_samples: int = 256  # Number of samples to use for timestep evaluation
 
