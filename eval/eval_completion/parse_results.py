@@ -185,6 +185,7 @@ def get_display_columns(results):
     # Default columns to display (most relevant hyperparameters + metrics)
     default_display = [
         "seed",
+        "remasking_logits_source",
         "remasker",
         "steps",
         "temperature", 
@@ -303,9 +304,9 @@ def print_summary_stats(results, summary_csv_path=None):
     
     # Parameters to group by (excluding seed) - only include varying ones
     group_params = [
-        "remasker", "steps", "temperature", "remasking_schedule", 
-        "remasking_t_on", "remasking_t_off", "remasking_alpha_on",
-        "remasking_temperature", "non_remasking_sampling_algorithm"
+        "remasking_logits_source", "remasker", "steps", "temperature",
+        "remasking_schedule", "remasking_t_on", "remasking_t_off", 
+        "remasking_alpha_on", "remasking_temperature", "non_remasking_sampling_algorithm"
     ]
     
     # Group results

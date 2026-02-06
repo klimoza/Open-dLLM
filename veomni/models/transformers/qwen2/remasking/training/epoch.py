@@ -296,6 +296,8 @@ def _forward_denoising_mode(
             use_class_reweighting=config.use_class_reweighting,
             label_smoothing_alpha=config.label_smoothing_alpha,
             device=config.device,
+            pos_class_weight=config.pos_class_weight,
+            use_ranknet_pairwise_loss=config.use_ranknet_pairwise_loss,
         )
         loss = loss / config.gradient_accumulation_steps
     

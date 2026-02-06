@@ -138,6 +138,10 @@ class RemaskerTrainingConfig:
     
     # Class reweighting
     use_class_reweighting: bool = True  # Reweight loss to handle class imbalance
+    pos_class_weight: float = 1.0  # Weight for positive class (1.0 = equal, <1 = penalize FP more, >1 = penalize FN more)
+    
+    # RankNet pairwise loss
+    use_ranknet_pairwise_loss: bool = False  # Use RankNet pairwise ranking loss instead of BCE
     
     # Label smoothing
     label_smoothing_alpha: float = 0.0  # If > 0, use soft labels: 0 -> alpha, 1 -> 1-alpha

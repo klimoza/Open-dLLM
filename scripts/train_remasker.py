@@ -224,7 +224,15 @@ def main(config: RemaskerTrainingConfig):
     
     print(f"\nStarting training for {config.epochs} epochs...")
     print(f"Total steps: {total_steps}, Warmup steps: {warmup_steps}, Save every: {config.save_every_n_steps} steps")
-    print(f"Class reweighting: {'enabled' if config.use_class_reweighting else 'disabled'}")
+    if config.use_class_reweighting:
+        if config.pos_class_weight != 1.0:
+            print(f"Class reweighting: enabled (auto-balance + pos_class_weight={config.pos_class_weight})")
+        else:
+            print(f"Class reweighting: enabled (auto-balance)")
+    elif config.pos_class_weight != 1.0:
+        print(f"Class reweighting: manual (pos_class_weight={config.pos_class_weight})")
+    else:
+        print(f"Class reweighting: disabled")
     if config.label_smoothing_alpha > 0:
         print(f"Label smoothing: alpha={config.label_smoothing_alpha} (0->{config.label_smoothing_alpha:.3f}, 1->{1-config.label_smoothing_alpha:.3f})")
     if config.use_denoising_training:
@@ -236,6 +244,8 @@ def main(config: RemaskerTrainingConfig):
         print("Confidence conditioning: enabled (remasker will receive backbone confidence as input)")
     if config.use_x_t_conditioning:
         print("x_t conditioning: enabled (remasker will use cross-attention on noisy/masked tokens)")
+    if config.use_ranknet_pairwise_loss:
+        print("RankNet pairwise loss: enabled (replaces BCE)")
     
     for epoch in range(config.epochs):
         # Train
@@ -320,7 +330,11 @@ if __name__ == "__main__":
     
     # Class reweighting and label smoothing
     parser.add_argument("--no_class_reweighting", action="store_true", help="Disable class reweighting for imbalanced classes")
+    parser.add_argument("--pos_class_weight", type=float, default=1.0, help="Weight multiplier for positive class (1.0=equal, <1=penalize FP more, >1=penalize FN more). E.g., 0.5 means false positives are 2x worse than false negatives.")
     parser.add_argument("--label_smoothing_alpha", type=float, default=0.0, help="Label smoothing: 0->alpha, 1->1-alpha (default: 0.0, no smoothing)")
+    
+    # RankNet pairwise loss
+    parser.add_argument("--use_ranknet_pairwise_loss", action="store_true", help="Use RankNet pairwise ranking loss instead of BCE (encourages correct tokens to rank higher than corrupted)")
     
     # Denoising training mode
     parser.add_argument("--use_denoising_training", action="store_true", help="Use denoising-based training that matches inference")
@@ -384,6 +398,8 @@ if __name__ == "__main__":
         seed=args.seed,
         num_workers=args.num_workers,
         use_class_reweighting=not args.no_class_reweighting,
+        pos_class_weight=args.pos_class_weight,
+        use_ranknet_pairwise_loss=args.use_ranknet_pairwise_loss,
         label_smoothing_alpha=args.label_smoothing_alpha,
         save_every_n_steps=args.save_every_n_steps,
         eval_ratio=args.eval_ratio,

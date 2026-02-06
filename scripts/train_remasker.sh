@@ -11,7 +11,7 @@ DENOISING_TEMP_STEPS=0.0
 DENOISING_NUM_STEPS=1
 LAYERS=12
 EFFECTIVE_BS=$((BS * GRAD_ACC))
-run_name="remasker-training-open-dcoder-0.5B-layers${LAYERS}-lr${LR}-eff_bs${EFFECTIVE_BS}-init_from_backbone-denoising-t${DENOISING_T_ON}-t${DENOISING_T_OFF}-time_cond"
+run_name="remasker-training-open-dcoder-0.5B-layers${LAYERS}-lr${LR}-eff_bs${EFFECTIVE_BS}-init_from_backbone-denoising-t${DENOISING_T_ON}-t${DENOISING_T_OFF}-time_cond-pos_class_weight_0.5"
 
 CUDA_VISIBLE_DEVICES=0 python scripts/train_remasker.py \
     --backbone_path fredzzp/open-dcoder-0.5B \
@@ -38,7 +38,9 @@ CUDA_VISIBLE_DEVICES=0 python scripts/train_remasker.py \
     --init_layer_offset 0 \
     --denoising_num_steps $DENOISING_NUM_STEPS \
     --denoising_temperature $DENOISING_TEMP_STEPS \
-    --use_time_conditioning 
+    --use_time_conditioning \
+    --pos_class_weight 0.5
+    # --use_confidence_conditioning \
     # --x_t_condition
     # --use_time_conditioning \
     # --use_confidence_conditioning \

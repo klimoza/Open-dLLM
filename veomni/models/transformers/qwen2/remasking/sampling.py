@@ -86,6 +86,7 @@ def get_remasking_logits(
         source: Source of logits. Options:
                 - "random": uniform random logits
                 - "model": use trained remasker model
+                - "backbone": use backbone confidence directly (equivalent to p2 algorithm)
         device: Device to create tensor on
         dtype: Data type for the logits tensor
         temperature: Temperature for scaling logits (default 1.0). Higher values make
@@ -139,13 +140,26 @@ def get_remasking_logits(
             # Scale logits high to make Gumbel noise negligible
             logits = logits * 1e6
     
-    elif source == "confs":
-        # Use model confidence scores (to be implemented)
-        # This would use the confidence from sample_tokens
-        raise NotImplementedError("Remasking logits source 'confs' not yet implemented.")
+    elif source in ["backbone", "confs"]:
+        # Use backbone confidence directly as remasking logits
+        # Higher confidence = higher logits = more likely to be kept unmasked
+        # This makes the algorithm equivalent to p2 when t_on=1, t_off=0
+        if confidence is None:
+            raise ValueError(f"confidence must be provided when source='{source}'")
+        
+        # Use confidence directly as logits
+        logits = confidence.clone().to(dtype)
+        
+        # Apply temperature scaling
+        if temperature > 0:
+            logits = logits / temperature
+        else:
+            # Temperature=0: deterministic selection (top-k without randomness)
+            # Scale logits high to make Gumbel noise negligible
+            logits = logits * 1e6
     
     else:
-        raise NotImplementedError(f"Remasking logits source '{source}' not implemented. Use 'random' or 'model'.")
+        raise NotImplementedError(f"Remasking logits source '{source}' not implemented. Use 'random', 'model', or 'backbone'.")
     
     # Mask out non-candidate positions with -inf
     logits = logits.masked_fill(~candidate_mask, float('-inf'))

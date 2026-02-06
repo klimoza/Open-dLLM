@@ -81,7 +81,7 @@ class RemaskingConfig:
         self.remasking_alpha_on = kwargs.pop("remasking_alpha_on", 0.9)
         
         self.remasking_logits_source = kwargs.pop("remasking_logits_source", "random")
-        # remasking_logits_source: random, model, confs
+        # remasking_logits_source: random, model, backbone (backbone = p2-style confidence-based selection)
         self.remasking_temperature = kwargs.pop("remasking_temperature", 1.0)
 
         self.non_remasking_sampling_algorithm = kwargs.pop("non_remasking_sampling_algorithm", "origin")
@@ -417,8 +417,9 @@ class MDMGenerationMixin:
                         remasker_model = remasking_cfg._remasker_model
                     
                     # Compute alpha (ratio of tokens to keep unmasked) based on schedule
+                    # Use s (target timestep) instead of t to match p2's kappa_t = (i+1)/steps
                     alpha = compute_alpha(
-                        t=t.item(),
+                        t=s.item(),
                         schedule=remasking_cfg.schedule,
                         t_on=remasking_cfg.remasking_t_on,
                         t_off=remasking_cfg.remasking_t_off,
