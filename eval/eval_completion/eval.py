@@ -48,6 +48,9 @@ class CustomCoder(LM):
         remasking_temperature: Optional[float] = 1.0,
         non_remasking_sampling_algorithm: Optional[str] = "origin",
         remasker_checkpoint_path: Optional[str] = None,
+        # Threshold-based remasking parameters (only used when alg='remasking_threshold')
+        remasking_threshold: Optional[float] = 0.0,
+        remasking_min_unmask_tokens: Optional[int] = 0,
         # Other lm-harness params
         max_length: Optional[int] = 2048,
         **kwargs,
@@ -81,6 +84,8 @@ class CustomCoder(LM):
         self.remasking_temperature = remasking_temperature
         self.non_remasking_sampling_algorithm = non_remasking_sampling_algorithm
         self.remasker_checkpoint_path = remasker_checkpoint_path
+        self.remasking_threshold = remasking_threshold
+        self.remasking_min_unmask_tokens = remasking_min_unmask_tokens
 
         # Load the custom model and tokenizer
         self._create_model_and_tokenizer(pretrained, dtype)
@@ -176,7 +181,7 @@ class CustomCoder(LM):
 
         # Create remasking config if using remasking algorithm
         remasking_config = None
-        if self.alg == 'remasking':
+        if self.alg in ('remasking', 'remasking_threshold'):
             remasking_config = RemaskingConfig(
                 schedule=self.remasking_schedule,
                 remasking_t_on=self.remasking_t_on,
@@ -186,6 +191,8 @@ class CustomCoder(LM):
                 remasking_temperature=self.remasking_temperature,
                 non_remasking_sampling_algorithm=self.non_remasking_sampling_algorithm,
                 remasker_checkpoint_path=self.remasker_checkpoint_path,
+                remasking_threshold=self.remasking_threshold,
+                remasking_min_unmask_tokens=self.remasking_min_unmask_tokens,
             )
 
         # Create a generation configuration object

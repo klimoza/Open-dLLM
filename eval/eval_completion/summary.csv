@@ -1,28 +1,54 @@
-remasking_logits_source,remasker,temperature,remasking_t_on,remasking_t_off,humaneval_pass@1_mean,humaneval_pass@1_std,n
-backbone,t0.95-0.05/step_12000,0.0,0.05,0.5,0.11585365853658536,0.006097560975609755,2
-backbone,t0.95-0.05/step_12000,0.0,0.5,0.05,0.14024390243902438,0.016809815551329536,10
-backbone,t0.95-0.05/step_12000,0.0,0.5,0.5,0.11524390243902438,0.017556317132790208,10
-backbone,t0.95-0.05/step_12000,0.0,1.0,0.05,0.14999999999999997,0.00298718261315022,10
-backbone,t0.95-0.05/step_12000,0.0,1.0,0.5,0.15121951219512192,0.013579913080073223,10
-model,no_hs_nsteps1_t0.95-0.05/step_5000,0.0,0.5,0.05,0.10243902439024391,0.014116874271695395,5
-model,no_hs_nsteps1_t0.95-0.05/step_5000,0.0,1.0,0.05,0.12638580931263857,0.0037596064208011495,11
-model,no_hs_nsteps1_t0.95-0.05/step_5000,0.0,1.0,0.5,0.13048780487804876,0.0078086880944303085,10
-model,no_hs_nsteps1_t0.95-0.05/step_5000,0.0,1.0,1.0,0.11524390243902441,0.017556317132790208,10
-model,no_hs_nsteps1_t0.95-0.05/step_5000,0.5,1.0,0.05,0.12601626016260162,0.01252929675400199,3
-model,no_hs_nsteps1_t0.95-0.05/step_5000,0.5,1.0,0.5,0.12601626016260162,0.02012092466790989,3
-model,no_hs_nsteps1_t0.95-0.05/step_5000,0.5,1.0,1.0,0.10772357723577236,0.012529296754001985,3
-model,t0.95-0.05/step_12000,0.0,0.05,0.05,0.11524390243902438,0.017556317132790208,10
-model,t0.95-0.05/step_12000,0.0,0.05,0.5,0.11524390243902438,0.017556317132790208,10
-model,t0.95-0.05/step_12000,0.0,0.5,0.05,0.10670731707317074,0.026332710831328272,10
-model,t0.95-0.05/step_12000,0.0,0.5,0.5,0.11524390243902438,0.017556317132790208,10
-model,t0.95-0.05/step_12000,0.0,1.0,0.05,0.14024390243902438,2.7755575615628914e-17,10
-model,t0.95-0.05/step_12000,0.0,1.0,0.5,0.13963414634146343,0.0032836370775210363,10
-model,t0.95-0.05/step_12000,0.5,0.05,0.05,0.10304878048780489,0.017556317132790204,10
-model,t0.95-0.05/step_12000,0.5,0.05,0.5,0.10365853658536586,0.012195121951219513,10
-model,t0.95-0.05/step_12000,0.5,0.5,0.05,0.10304878048780489,0.017127526713644075,10
-model,t0.95-0.05/step_12000,0.5,0.5,0.5,0.10304878048780489,0.017556317132790204,10
-model,t0.95-0.05/step_12000,0.5,1.0,0.05,0.12621951219512195,0.013372995243573967,10
-model,t0.95-0.05/step_12000,0.5,1.0,0.5,0.12987804878048784,0.014948354478208855,10
-model,time+conf_no_hs_nsteps1_t0.95-0.05/step_5000,0.0,1.0,0.05,0.10365853658536585,0.0,3
-model,time+conf_no_hs_nsteps1_t0.95-0.05/step_5000,0.0,1.0,0.5,0.11178861788617885,0.007604994688564922,3
-model,time+conf_no_hs_nsteps1_t0.95-0.05/step_5000,0.0,1.0,1.0,0.11280487804878049,0.012067420820160487,6
+remasker,opt_steps,T,t_on,t_off,128_pass@1,128_std,128_n,64_pass@1,64_std,64_n,32_pass@1,32_std,32_n,16_pass@1,16_std,16_n,8_pass@1,8_std,8_n
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0,5k,0,0.5,0.05,0.10243902439024391,0.014116874271695395,5,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0,5k,0,1,0.05,0.12638580931263857,0.0037596064208011495,11,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0,5k,0,1,0.5,0.13048780487804876,0.0078086880944303085,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0,5k,0,1,1,0.11524390243902441,0.017556317132790208,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0,5k,0.5,1,0.05,0.12601626016260162,0.01252929675400199,3,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0,5k,0.5,1,0.5,0.12601626016260162,0.02012092466790989,3,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0,5k,0.5,1,1,0.10772357723577236,0.012529296754001985,3,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0-time_conditioning-confidence_conditioning,5k,0,1,0.05,0.10365853658536585,0.0,3,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0-time_conditioning-confidence_conditioning,5k,0,1,0.5,0.11178861788617885,0.007604994688564922,3,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0-time_conditioning-confidence_conditioning,5k,0,1,1,0.11280487804878049,0.012067420820160487,6,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0,0.05,0.05,0.11524390243902438,0.017556317132790208,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0,0.05,0.5,0.11524390243902438,0.017556317132790208,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0,0.5,0.05,0.10670731707317074,0.026332710831328272,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0,0.5,0.5,0.11524390243902438,0.017556317132790208,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0,1,0.05,0.14024390243902438,2.7755575615628914e-17,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0,1,0.5,0.13963414634146343,0.0032836370775210363,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0.5,0.05,0.05,0.10304878048780489,0.017556317132790204,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0.5,0.05,0.5,0.10365853658536586,0.012195121951219513,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0.5,0.5,0.05,0.10304878048780489,0.017127526713644075,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0.5,0.5,0.5,0.10304878048780489,0.017556317132790204,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0.5,1,0.05,0.12621951219512195,0.013372995243573967,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0.5,1,0.5,0.12987804878048784,0.014948354478208855,10,,,,,,,,,,,,
+backbone: remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0,0.05,0.5,0.11585365853658536,0.006097560975609755,2,,,,,,,,,,,,
+backbone: remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0,0.5,0.05,0.14024390243902438,0.016809815551329536,10,,,,,,,,,,,,
+backbone: remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0,0.5,0.5,0.11524390243902438,0.017556317132790208,10,,,,,,,,,,,,
+backbone: remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0,1,0.05,0.14999999999999997,0.00298718261315022,10,,,,,,,,,,,,
+backbone: remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond,12k,0,1,0.5,0.15121951219512192,0.013579913080073223,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-pos_class_weight_0.5,5k,0,0.5,0.5,0.11498257839721253,0.01194364912961855,7,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-pos_class_weight_0.5,5k,0,1,0.05,0.13292682926829272,0.0024390243902439046,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-pos_class_weight_0.5,5k,0,1,0.5,0.1298780487804878,0.007736937524664349,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0,0.05,0.05,0.11524390243902438,0.017556317132790208,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0,0.05,0.5,0.11524390243902438,0.017556317132790208,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0,0.5,0.05,0.1097560975609756,0.02248669379827534,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0,0.5,0.5,0.11524390243902438,0.017556317132790208,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0,1,0.05,0.1768292682926829,2.7755575615628914e-17,10,0.14329268292682923,0.003048780487804867,10,0.12195121951219515,2.7755575615628914e-17,10,0.10975609756097562,1.3877787807814457e-17,10,0.06707317073170734,1.3877787807814457e-17,10
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0,1,0.5,0.16097560975609754,0.008271134125762525,10,0.15853658536585363,0.006679543384209349,10,0.14268292682926828,0.00952469472671543,10,0.11707317073170734,0.0036585365853658513,10,0.055487804878048774,0.0057524275195467095,10
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0.1,1,0,0.15243902439024387,0.024237325505307064,10,0.12804878048780485,0.015182804387791135,10,0.12560975609756095,0.013688990439416862,10,0.08536585365853658,0.01363456083841335,10,0.04024390243902439,0.014221833889866586,10
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0.1,1,0.5,0.15243902439024387,0.020767544348690735,10,0.13536585365853657,0.017630283286342634,10,0.12134146341463417,0.014544951758386057,10,0.08170731707317072,0.013414634146341463,10,0.04207317073170731,0.013756724600827412,10
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0.5,0.5,0.5,0.1088850174216028,0.015435579396053441,7,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0.5,1,0.05,0.13902439024390242,0.015133748348769335,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0.5,1,0.5,0.13841463414634145,0.02113137006239446,10,,,,,,,,,,,,
+backbone: remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0,1,0.05,,,,0.13048780487804876,0.00298718261315022,10,0.12804878048780485,2.7755575615628914e-17,10,0.04268292682926829,6.938893903907228e-18,10,,,
+backbone: remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0,1,0.5,,,,0.1207317073170732,0.007110916944933295,10,0.10365853658536583,0.014684871437551582,10,0.0274390243902439,0.006248140710950976,10,,,
+backbone: remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0.5,0.5,0.05,0.14227642276422767,0.01748440094927363,6,,,,,,,,,,,,
+backbone: remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss,17k,0.5,1,0.05,0.16036585365853656,0.014697525357553596,10,,,,,,,,,,,,
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-1.0-time_cond-ranknet_loss,3k,0,1,0,,,,,,,,,,0.07926829268292682,1.3877787807814457e-17,10,0.030487804878048787,6.938893903907228e-18,10
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-1.0-time_cond-ranknet_loss,3k,0,1,0.5,,,,,,,,,,0.0871951219512195,0.006707317073170732,10,0.03353658536585366,0.006248140710950975,10
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-1.0-time_cond-ranknet_loss,3k,0.1,1,0,,,,,,,,,,0.08130081300813008,0.020426576465692868,6,0.045121951219512194,0.007808688094430303,10
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-1.0-time_cond-ranknet_loss,3k,0.1,1,0.5,,,,,,,,,,0.0823170731707317,0.0134284850887471,10,0.04146341463414634,0.00936725091203489,10
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-1.0-time_cond-ranknet_loss,3k,0.5,1,0,,,,,,,,,,,,,0.04695121951219512,0.014182565060503667,10
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-1.0-time_cond-ranknet_loss,3k,0.5,1,0.5,,,,,,,,,,,,,0.03719512195121951,0.013483746577741453,10
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-1.0-time_cond-ranknet_loss,3k,1,1,0,,,,,,,,,,,,,0.018292682926829274,0.013359086768418687,10
+remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-1.0-time_cond-ranknet_loss,3k,1,1,0.5,,,,,,,,,,,,,0.014024390243902441,0.010221374764780617,10

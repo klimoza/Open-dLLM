@@ -145,6 +145,69 @@ def extract_params_from_config(data):
     return params
 
 
+def get_remasker_display_info(result):
+    """Extract remasker display name and optimization steps from result.
+    
+    - source == "backbone" → name includes "backbone:", opt_steps from path
+    - source == "model" → name is the checkpoint directory name, opt_steps from path
+    
+    Returns:
+        (name, opt_steps): e.g., ("eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond", "12k")
+    """
+    import re
+    
+    source = result.get("remasking_logits_source", "model")
+    ckpt_path = result.get("remasker_checkpoint_path", "") or ""
+    
+    # Extract optimization steps from checkpoint path (e.g. /step_5000 → "5k")
+    step_match = re.search(r'/step_(\d+)', ckpt_path)
+    if step_match:
+        steps_num = int(step_match.group(1))
+        if steps_num >= 1000:
+            opt_steps_str = f"{steps_num // 1000}k"
+        else:
+            opt_steps_str = str(steps_num)
+    else:
+        opt_steps_str = ""
+    
+    # Extract the checkpoint directory name (strip common prefix)
+    parts = ckpt_path.rstrip("/").split("/")
+    # Remove step_* suffix to get directory name
+    if parts and parts[-1].startswith("step_"):
+        parts = parts[:-1]
+    
+    if parts:
+        ckpt_dir = parts[-1]
+        # Strip common prefix "remasker-training-open-dcoder-0.5B-layers12-lr1e-5-"
+        # to keep only the distinctive part
+        prefix_match = re.match(r'remasker-training-[^-]+-[\d.]+B-layers\d+-lr[\de-]+-(?:bs\d+-ga\d+-rand[\d.]+-rep[\d.]+-ls[\d.]+-)?', ckpt_dir)
+        if prefix_match:
+            name = ckpt_dir[prefix_match.end():]
+        else:
+            name = ckpt_dir
+    else:
+        name = result.get("remasker", "unknown")
+    
+    # Prefix with source if backbone
+    if source == "backbone":
+        name = f"backbone: {name}"
+    
+    return name, opt_steps_str
+
+
+def _fmt_param(val):
+    """Format a numeric parameter, removing unnecessary trailing zeros."""
+    if val is None or val == "":
+        return ""
+    try:
+        f = float(val)
+        if f == int(f):
+            return str(int(f))
+        return f"{f:g}"
+    except (ValueError, TypeError):
+        return str(val)
+
+
 def parse_result_file(filepath):
     """Parse a single results*.json file."""
     try:
@@ -284,11 +347,19 @@ def format_table(results, display_columns=None):
 
 
 def print_summary_stats(results, summary_csv_path=None):
-    """Print summary statistics grouped by key hyperparameters."""
+    """Print summary in pivoted format with steps as column groups.
+    
+    Output format matches the spreadsheet layout:
+      remasker | opt_steps | T | t_on | t_off | 128 steps (pass@1,std,n) | 64 steps | ...
+    
+    Rows are grouped by (remasker, opt_steps). Within each group, rows
+    vary by (T, t_on, t_off). The remasker/opt_steps columns are only
+    printed on the first row of each group.
+    """
     if not results:
         return
     
-    # Find metric columns (only pass@1, not stderr)
+    # Find pass@1 metric columns (not stderr)
     metric_cols = []
     for r in results:
         for key in r.keys():
@@ -298,107 +369,166 @@ def print_summary_stats(results, summary_csv_path=None):
     if not metric_cols:
         return
     
-    print("\n" + "=" * 70)
-    print("SUMMARY STATISTICS (averaged over seeds)")
-    print("=" * 70)
+    # Use first metric for display (usually humaneval_pass@1)
+    primary_metric = metric_cols[0]
     
-    # Parameters to group by (excluding seed) - only include varying ones
-    group_params = [
-        "remasking_logits_source", "remasker", "steps", "temperature",
-        "remasking_schedule", "remasking_t_on", "remasking_t_off", 
-        "remasking_alpha_on", "remasking_temperature", "non_remasking_sampling_algorithm"
-    ]
+    # Detect step values from data (sorted descending)
+    step_set = set()
+    for r in results:
+        s = r.get("steps")
+        if s is not None:
+            try:
+                step_set.add(int(float(s)))
+            except (ValueError, TypeError):
+                pass
+    step_values = sorted(step_set, reverse=True) if step_set else [128, 64, 32, 16, 8]
     
-    # Group results
+    # Enrich results with display info
+    for r in results:
+        name, opt = get_remasker_display_info(r)
+        r["_display_name"] = name
+        r["_opt_steps"] = opt
+    
+    # Group results by (name, opt, T, t_on, t_off, step) and compute stats
     groups = defaultdict(list)
+    remasker_order = []
+    remasker_set = set()
+    
     for r in results:
-        key_parts = []
-        for param in group_params:
-            if param in r:
-                key_parts.append((param, r[param]))
-        
-        key = tuple(key_parts)
+        try:
+            step_val = int(float(r.get("steps", 0)))
+        except (ValueError, TypeError):
+            step_val = 0
+        key = (
+            r["_display_name"],
+            r["_opt_steps"],
+            _fmt_param(r.get("temperature", "")),
+            _fmt_param(r.get("remasking_t_on", "")),
+            _fmt_param(r.get("remasking_t_off", "")),
+            step_val,
+        )
         groups[key].append(r)
+        
+        rg = (r["_display_name"], r["_opt_steps"])
+        if rg not in remasker_set:
+            remasker_order.append(rg)
+            remasker_set.add(rg)
     
-    # Find which params actually vary
-    all_values = {p: set() for p in group_params}
-    for r in results:
-        for p in group_params:
-            if p in r:
-                all_values[p].add(str(r[p]))
-    
-    varying_params = [p for p in group_params if len(all_values[p]) > 1]
-    
-    # Build summary rows (with separate mean/std columns for CSV)
-    summary_rows = []
-    summary_rows_csv = []
-    for key, group_results in sorted(groups.items()):
-        row = dict(key)
-        row_csv = dict(key)
+    # Compute stats: mean, std, n for each group
+    stats = {}
+    for key, group_results in groups.items():
+        metric_stats = {}
         for metric in metric_cols:
-            values = [r.get(metric) for r in group_results if metric in r and r.get(metric) is not None]
+            values = [r.get(metric) for r in group_results
+                      if metric in r and r.get(metric) is not None]
             if values:
                 mean_val = sum(values) / len(values)
                 std_val = 0.0
                 if len(values) > 1:
                     std_val = (sum((v - mean_val) ** 2 for v in values) / len(values)) ** 0.5
-                    row[metric] = f"{mean_val:.4f} ± {std_val:.4f}"
-                else:
-                    row[metric] = f"{mean_val:.4f}"
-                row["n"] = len(values)
-                
-                # CSV version with separate columns
-                row_csv[f"{metric}_mean"] = mean_val
-                row_csv[f"{metric}_std"] = std_val
-                row_csv["n"] = len(values)
-        summary_rows.append(row)
-        summary_rows_csv.append(row_csv)
+                metric_stats[metric] = (mean_val, std_val, len(values))
+        stats[key] = metric_stats
     
-    # Print as table - only show varying params + metrics
-    display_cols = varying_params + metric_cols + ["n"]
+    # Collect unique (T, t_on, t_off) combos per remasker group
+    param_combos = defaultdict(set)
+    for key in stats:
+        name, opt, T, t_on, t_off, step = key
+        param_combos[(name, opt)].add((T, t_on, t_off))
     
-    # Calculate column widths
-    col_widths = {}
-    for col in display_cols:
-        max_width = len(col)
-        for row in summary_rows:
-            val_str = str(row.get(col, ""))
-            max_width = max(max_width, len(val_str))
-        col_widths[col] = min(max_width + 1, 45)
+    # --- Print table ---
+    print("\n" + "=" * 70)
+    print("SUMMARY (averaged over seeds)")
+    print("=" * 70)
     
-    # Print header
-    header = " | ".join(col.ljust(col_widths[col])[:col_widths[col]] for col in display_cols)
-    separator = "-+-".join("-" * col_widths[col] for col in display_cols)
+    # Compute dynamic width for remasker name column
+    max_name_len = max((len(name) for name, _ in remasker_order), default=10)
+    W_NAME = max(max_name_len + 2, 12)
+    W_OPT = 12
+    W_T = 5
+    W_TON = 5
+    W_TOFF = 6
+    W_PASS = 8
+    W_STD = 7
+    W_N = 4
+    
+    # Header line 1: step groups
+    fixed_width = W_NAME + W_OPT + W_T + W_TON + W_TOFF + 8  # 8 = separators
+    h1 = " " * fixed_width
+    for step in step_values:
+        step_label = f"{step} steps"
+        group_w = W_PASS + W_STD + W_N + 2
+        h1 += f"  {step_label:^{group_w}}"
+    
+    # Header line 2: sub-column names
+    h2 = (f"{'remasker':<{W_NAME}}  {'opt_steps':<{W_OPT}}  "
+          f"{'T':>{W_T}}  {'t_on':>{W_TON}}  {'t_off':>{W_TOFF}}")
+    for _ in step_values:
+        h2 += f"  {'pass@1':>{W_PASS}} {'std':>{W_STD}} {'n':>{W_N}}"
+    
+    sep = "-" * len(h2)
     
     print()
-    print(separator)
-    print(header)
-    print(separator)
+    print(h1)
+    print(h2)
+    print(sep)
     
-    # Print rows
-    for row in summary_rows:
-        row_values = []
-        for col in display_cols:
-            val = row.get(col, "")
-            val_str = str(val)
-            row_values.append(val_str.ljust(col_widths[col])[:col_widths[col]])
-        print(" | ".join(row_values))
+    # Print data rows grouped by remasker
+    csv_rows = []
+    for rg in remasker_order:
+        name, opt = rg
+        combos = sorted(param_combos.get(rg, set()),
+                        key=lambda x: (float(x[0]) if x[0] else 0,
+                                       float(x[1]) if x[1] else 0,
+                                       float(x[2]) if x[2] else 0))
+        
+        first_row = True
+        for T, t_on, t_off in combos:
+            if first_row:
+                row = f"{name:<{W_NAME}}  {opt:<{W_OPT}}"
+                first_row = False
+            else:
+                row = f"{'':<{W_NAME}}  {'':<{W_OPT}}"
+            
+            row += f"  {T:>{W_T}}  {t_on:>{W_TON}}  {t_off:>{W_TOFF}}"
+            
+            csv_row = {
+                "remasker": name,
+                "opt_steps": opt,
+                "T": T,
+                "t_on": t_on,
+                "t_off": t_off,
+            }
+            
+            for step in step_values:
+                key = (name, opt, T, t_on, t_off, step)
+                if key in stats and primary_metric in stats[key]:
+                    mean_val, std_val, n = stats[key][primary_metric]
+                    pass_str = f"{mean_val * 100:.2f}%"
+                    std_str = f"{std_val * 100:.2f}%"
+                    n_str = str(n)
+                    row += f"  {pass_str:>{W_PASS}} {std_str:>{W_STD}} {n_str:>{W_N}}"
+                    csv_row[f"{step}_pass@1"] = mean_val
+                    csv_row[f"{step}_std"] = std_val
+                    csv_row[f"{step}_n"] = n
+                else:
+                    row += f"  {'':>{W_PASS}} {'':>{W_STD}} {'':>{W_N}}"
+            
+            print(row)
+            csv_rows.append(csv_row)
+        
+        # Separator between remasker groups
+        print(sep)
     
-    print(separator)
-    
-    # Export summary to CSV if requested
+    # Export to CSV
     if summary_csv_path:
-        # Build CSV columns: varying params + metric_mean + metric_std + n
-        csv_cols = varying_params.copy()
-        for metric in metric_cols:
-            csv_cols.append(f"{metric}_mean")
-            csv_cols.append(f"{metric}_std")
-        csv_cols.append("n")
+        csv_cols = ["remasker", "opt_steps", "T", "t_on", "t_off"]
+        for step in step_values:
+            csv_cols.extend([f"{step}_pass@1", f"{step}_std", f"{step}_n"])
         
         with open(summary_csv_path, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=csv_cols, extrasaction='ignore')
             writer.writeheader()
-            writer.writerows(summary_rows_csv)
+            writer.writerows(csv_rows)
         
         print(f"\nSummary exported to: {summary_csv_path}")
 

@@ -40,15 +40,16 @@ prompt = "def factorial(n):\n    \"\"\"Return the factorial of a non-negative in
 
 input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
 
-max_new_tokens = 128
+max_new_tokens = 64
 steps = 64
 
 # remasking_checkpoint_path = "/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_from_backbone-denoising-t0.2-t0.1-temp0.0/step_45000"
 
 # remasking_checkpoint_path = "/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.05-rep0.05-ls0.00-init_from_backbone-denoising-t0.2-t0.1-temp0.0/step_30000"
 
-remasking_checkpoint_path = "/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0/step_3000"
+# remasking_checkpoint_path = "/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0/step_3000"
 
+remasking_checkpoint_path = "/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-ranknet_loss/step_17000"
 
 # Create a generation configuration object
 generation_config = MDMGenerationConfig(
@@ -57,11 +58,11 @@ generation_config = MDMGenerationConfig(
     eos_token_id=tokenizer.eos_token_id,
     max_new_tokens=max_new_tokens,
     steps=steps,
-    temperature=0.5,
+    temperature=0.1,
     top_k=200,
-    alg='remasking',
+    alg="remasking",
     alg_temp=0.0,
-    num_return_sequences=2,
+    num_return_sequences=10,
     return_dict_in_generate=True,
     output_history=True,
     remasking_config=RemaskingConfig(
@@ -73,6 +74,9 @@ generation_config = MDMGenerationConfig(
         remasker_checkpoint_path=remasking_checkpoint_path,
         non_remasking_sampling_algorithm="entropy",
         remasking_temperature=0.0,
+        # Threshold-based remasking (used with alg="remasking_threshold")
+        remasking_threshold=0.995,
+        remasking_min_unmask_tokens=1,
     )
 )
 
@@ -90,7 +94,11 @@ print("Generation complete.")
 # 5. Decode and print the output
 prompt_len = input_ids.shape[1]
 generated_sequences = outputs.sequences
-for i in range(steps):
+
+
+
+
+for i in range(len(outputs['history'])):
     masks = ((outputs['history'][i][0]==tokenizer.mask_token_id).int().tolist())
     masks = "".join(["M" if m else " " for m in masks])
     print(masks)
@@ -100,6 +108,30 @@ for i in range(steps):
     # print()
     # print("--------------------------------")
     # print()
+
+
+import numpy as np
+
+# Compute trajectory length per sequence (number of steps until no masks remain)
+num_sequences = outputs['history'][0].shape[0]
+trajectory_lengths = []
+for seq_idx in range(num_sequences):
+    traj_len = len(outputs['history'])  # default: ran all steps
+    for step_idx, snapshot in enumerate(outputs['history']):
+        if (snapshot[seq_idx] == tokenizer.mask_token_id).sum().item() == 0:
+            traj_len = step_idx + 1
+            break
+    trajectory_lengths.append(traj_len)
+
+trajectory_lengths = np.array(trajectory_lengths)
+print(f"\n--- Trajectory Lengths ---")
+for seq_idx, length in enumerate(trajectory_lengths):
+    print(f"  Sequence {seq_idx}: {length} steps")
+print(f"  Mean: {trajectory_lengths.mean():.2f}  Std: {trajectory_lengths.std():.2f}")
+
+
+
+
 print("\n--- Prompt ---")
 print(tokenizer.decode(input_ids[0], skip_special_tokens=True))
 for i in range(10):

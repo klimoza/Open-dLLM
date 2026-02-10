@@ -153,6 +153,9 @@ class RemaskerTrainingConfig:
     denoising_temperature: float = 0.0  # Temperature for sampling x_0 from logits (0 = greedy)
     denoising_num_steps: int = 4  # Number of denoising steps (1 = single-step, >1 = multi-step entropy-based)
     
+    # Resume from checkpoint
+    resume_from_checkpoint: Optional[str] = None  # Path to remasker checkpoint dir to resume from
+    
     # Other
     seed: int = 42
     num_workers: int = 4

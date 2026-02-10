@@ -67,14 +67,14 @@ def main(config: RemaskerTrainingConfig):
     """Main training function."""
     set_seed(config.seed)
     
-    # Create checkpoint directory (fail if already exists to prevent overwriting)
+    # Create checkpoint directory
     save_path = os.path.join(config.checkpoint_dir, config.checkpoint_name)
-    if os.path.exists(save_path):
+    if os.path.exists(save_path) and config.resume_from_checkpoint is None:
         raise FileExistsError(
             f"Checkpoint directory already exists: {save_path}\n"
             f"Please use a different --checkpoint_name or remove the existing directory."
         )
-    os.makedirs(save_path)
+    os.makedirs(save_path, exist_ok=True)
     
     # Save config
     config_path = os.path.join(save_path, "training_config.json")
@@ -123,7 +123,42 @@ def main(config: RemaskerTrainingConfig):
     
     print(f"Creating remasker with {config.remasker_num_layers} layers (use_hidden_states={config.use_hidden_states}, use_time_conditioning={config.use_time_conditioning}, use_confidence_conditioning={config.use_confidence_conditioning}, use_x_t_conditioning={config.use_x_t_conditioning})...")
     
-    if config.init_from_backbone:
+    if config.resume_from_checkpoint is not None:
+        # Resume from checkpoint: verify config match, then load weights
+        ckpt_config_path = os.path.join(config.resume_from_checkpoint, "config.json")
+        if not os.path.exists(ckpt_config_path):
+            raise FileNotFoundError(f"No config.json found in checkpoint: {config.resume_from_checkpoint}")
+        
+        with open(ckpt_config_path, "r") as f:
+            ckpt_config_dict = json.load(f)
+        
+        # Verify architecture fields match
+        fields_to_check = [
+            "num_layers", "hidden_size", "intermediate_size",
+            "num_attention_heads", "num_key_value_heads", "vocab_size",
+            "backbone_hidden_size", "use_hidden_states",
+            "use_time_conditioning", "use_confidence_conditioning", "use_x_t_conditioning",
+        ]
+        current_config_dict = remasker_config.to_dict()
+        mismatches = []
+        for field in fields_to_check:
+            ckpt_val = ckpt_config_dict.get(field)
+            cur_val = current_config_dict.get(field)
+            if ckpt_val != cur_val:
+                mismatches.append(f"  {field}: checkpoint={ckpt_val}, current={cur_val}")
+        
+        if mismatches:
+            raise ValueError(
+                f"Config mismatch between checkpoint and current training config:\n"
+                + "\n".join(mismatches)
+                + f"\nCheckpoint: {config.resume_from_checkpoint}"
+            )
+        
+        print(f"Resuming from checkpoint: {config.resume_from_checkpoint} (config verified)")
+        model = Remasker.from_pretrained(config.resume_from_checkpoint, device=config.device)
+        model = model.to(config.device)
+    
+    elif config.init_from_backbone:
         # Calculate layer offset (default: use last N layers from backbone)
         if config.init_layer_offset < 0:
             backbone_num_layers = backbone_config.num_hidden_layers
@@ -352,6 +387,10 @@ if __name__ == "__main__":
     # x_t conditioning (cross-attention)
     parser.add_argument("--x_t_condition", action="store_true", help="Enable x_t conditioning via cross-attention (uses double denoising scheme)")
     
+    # Resume from checkpoint (fine-tuning)
+    parser.add_argument("--resume_from_checkpoint", type=str, default=None,
+                        help="Path to a remasker checkpoint directory to resume from (loads model weights, verifies config match)")
+    
     # Other
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_workers", type=int, default=4)
@@ -414,6 +453,7 @@ if __name__ == "__main__":
         use_x_t_conditioning=args.x_t_condition,
         eval_timesteps_every_n_steps=args.eval_timesteps_every_n_steps,
         eval_timesteps_num_samples=args.eval_timesteps_num_samples,
+        resume_from_checkpoint=args.resume_from_checkpoint,
     )
     
     main(config)
