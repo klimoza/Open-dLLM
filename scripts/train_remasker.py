@@ -386,6 +386,7 @@ if __name__ == "__main__":
     
     # x_t conditioning (cross-attention)
     parser.add_argument("--x_t_condition", action="store_true", help="Enable x_t conditioning via cross-attention (uses double denoising scheme)")
+    parser.add_argument("--x_t_cond_keep_ratio", type=float, default=0.5, help="Min fraction of originally-unmasked tokens to preserve in pred_x_0 -> pred_x_t")
     
     # Resume from checkpoint (fine-tuning)
     parser.add_argument("--resume_from_checkpoint", type=str, default=None,
@@ -451,6 +452,7 @@ if __name__ == "__main__":
         use_time_conditioning=args.use_time_conditioning,
         use_confidence_conditioning=args.use_confidence_conditioning,
         use_x_t_conditioning=args.x_t_condition,
+        x_t_cond_keep_ratio=args.x_t_cond_keep_ratio,
         eval_timesteps_every_n_steps=args.eval_timesteps_every_n_steps,
         eval_timesteps_num_samples=args.eval_timesteps_num_samples,
         resume_from_checkpoint=args.resume_from_checkpoint,

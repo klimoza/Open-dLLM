@@ -107,6 +107,7 @@ class RemaskerTrainingConfig:
     use_time_conditioning: bool = False  # Whether to condition remasker on timestep (noise level)
     use_confidence_conditioning: bool = False  # Whether to condition remasker on backbone prediction confidence
     use_x_t_conditioning: bool = False  # Whether to condition on x_t via cross-attention (uses double denoising scheme)
+    x_t_cond_keep_ratio: float = 0.5  # Min fraction of originally-unmasked tokens to preserve in pred_x_0 -> pred_x_t
     
     # Corruption settings
     random_corruption_ratio: float = 0.1  # a% of tokens changed to random

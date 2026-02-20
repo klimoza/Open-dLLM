@@ -56,14 +56,28 @@ def evaluate(
             else:
                 hidden_states = None
             
+            # Create timestep tensor if time conditioning is enabled
+            # Use t=0.5 as a default mid-range timestep for corruption-based eval
+            batch_size = input_ids.shape[0]
+            timestep_tensor = (
+                torch.full((batch_size,), 0.5, device=config.device)
+                if config.use_time_conditioning else None
+            )
+            
+            # Create confidence tensor if confidence conditioning is enabled
+            # Use 1.0 (fully confident) as default for corruption-based eval
+            confidence_tensor = (
+                torch.ones(input_ids.shape, device=config.device)
+                if config.use_confidence_conditioning else None
+            )
+            
             # Forward pass through remasker
-            # Note: timestep and confidence are None for evaluation (corruption-based)
             logits = model(
                 x_0=input_ids,
                 hidden_states=hidden_states,
                 attention_mask=attention_mask.float(),
-                timestep=None,
-                confidence=None,
+                timestep=timestep_tensor,
+                confidence=confidence_tensor,
             )
             
             # BCE loss

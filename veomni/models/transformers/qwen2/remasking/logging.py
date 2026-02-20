@@ -217,7 +217,7 @@ def evaluate_at_timesteps(
                     attention_mask=attention_mask.float(),
                     timestep=timestep_tensor,
                     confidence=confidence_full,
-                    x_t=None,  # No x_t conditioning for evaluation
+                    x_t=x_t if config.use_x_t_conditioning else None,
                 )
                 
                 # Compute loss

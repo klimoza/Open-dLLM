@@ -18,16 +18,17 @@ export HF_ALLOW_CODE_EVAL=1
 # REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-bs8-ga32-rand0.00-rep0.00-ls0.00-init_from_backbone-denoising-t0.95-t0.05-temp0.0-no_hidden_states-several_steps1_temp0.0-time_conditioning-confidence_conditioning/step_5000"
 # REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond/step_12000"
 # REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-time_cond-pos_class_weight_0.5/step_5000"
-REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-1.0-time_cond-ranknet_loss/step_3000"
+# REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-1.0-time_cond-ranknet_loss/step_3000"
+REMASKER_PATH="/home/ubuntu/Open-dLLM/checkpoints/remasker-training-open-dcoder-0.5B-layers12-lr1e-5-eff_bs256-init_from_backbone-denoising-t0.95-t0.05-0.0-time_cond-confidence_cond-ranknet_loss/step_18000"
 ALG_REMASKING="remasking"
 REMASKING_LOGITS_SOURCE="model"
 
 # === Hyperparameter lists (will run all combinations) ===
 STEPS_LIST=(8 16 32 64 128)
-TEMPERATURE_LIST=(0.0 0.1 0.5 1.0)
+TEMPERATURE_LIST=(0.0 0.1 0.25 0.5)
 REMASKING_SCHEDULE_LIST=("linear")
 REMASKING_T_ON_LIST=(1.0)
-REMASKING_T_OFF_LIST=(0.5 0.0)
+REMASKING_T_OFF_LIST=(0.0)
 REMASKING_ALPHA_ON_LIST=(0.9)
 REMASKING_TEMPERATURE_LIST=(0.0)
 REMASKING_THRESHOLD_LIST=(0.0)

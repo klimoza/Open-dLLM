@@ -194,6 +194,7 @@ def apply_x_t_conditioning(
     attention_mask: torch.Tensor,
     prompt_lens: torch.Tensor,
     alpha: float,
+    mask_positions: torch.Tensor,
     mask_token_id: int,
     backbone,
     config,
@@ -204,12 +205,17 @@ def apply_x_t_conditioning(
     This creates a second denoising step: pred_x_0 -> pred_x_t -> pred_pred_x_0
     which provides the remasker with both x_0 and x_t as conditioning signals.
     
+    When building pred_x_t, at least x_t_cond_keep_ratio of the positions that
+    were unmasked in x_t (original tokens) are guaranteed to remain unmasked,
+    while the overall masking ratio stays at alpha.
+    
     Args:
         x_0_full: First-step x_0 predictions [B, L]
         ground_truth_ids: Ground truth token ids [B, L]
         attention_mask: Attention mask [B, L]
         prompt_lens: Length of prompt for each sample [B]
         alpha: Fraction of tokens to keep unmasked
+        mask_positions: Boolean mask of positions that were masked in x_t [B, L]
         mask_token_id: Token id used for masking
         backbone: The backbone model
         config: Training configuration
@@ -224,26 +230,44 @@ def apply_x_t_conditioning(
     batch_size = x_0_full.shape[0]
     device = x_0_full.device
     
-    # x_0_full is now pred_x_0 (first denoising step result)
     pred_x_0 = x_0_full.clone()
     
     # Step 3: pred_x_0 -> pred_x_t (apply masking to pred_x_0)
+    # Guarantee that at least x_t_cond_keep_ratio of originally-unmasked tokens stay unmasked
     pred_x_t = pred_x_0.clone()
     pred_mask_positions = torch.zeros_like(pred_x_t, dtype=torch.bool)
     
     for b in range(batch_size):
         prompt_len = prompt_lens[b].item()
-        completion_len = (attention_mask[b].sum().item()) - prompt_len
+        completion_len = int(attention_mask[b].sum().item()) - prompt_len
         if completion_len <= 0:
             continue
         
-        # Apply same masking ratio to pred_x_0
-        num_to_mask = int(completion_len * (1 - alpha))
-        if num_to_mask > 0:
-            perm = torch.randperm(completion_len, device=device)
-            mask_indices = perm[:num_to_mask]
-            pred_x_t[b, prompt_len + mask_indices] = mask_token_id
-            pred_mask_positions[b, prompt_len + mask_indices] = True
+        num_keep = int(completion_len * alpha)
+        if num_keep >= completion_len:
+            continue
+        
+        completion_mask = mask_positions[b, prompt_len:prompt_len + completion_len]
+        orig_unmasked_idx = (~completion_mask).nonzero(as_tuple=True)[0]
+        orig_masked_idx = completion_mask.nonzero(as_tuple=True)[0]
+        
+        min_original_keep = min(int(config.x_t_cond_keep_ratio * num_keep), orig_unmasked_idx.numel())
+        min_original_keep = min(min_original_keep, num_keep)
+        
+        perm_orig = torch.randperm(orig_unmasked_idx.numel(), device=device)
+        forced_keep = orig_unmasked_idx[perm_orig[:min_original_keep]]
+        
+        remaining_slots = num_keep - min_original_keep
+        other_positions = torch.cat([orig_unmasked_idx[perm_orig[min_original_keep:]], orig_masked_idx])
+        perm_other = torch.randperm(other_positions.numel(), device=device)
+        random_keep = other_positions[perm_other[:remaining_slots]]
+        
+        pred_x_t[b, prompt_len:prompt_len + completion_len] = mask_token_id
+        pred_mask_positions[b, prompt_len:prompt_len + completion_len] = True
+        
+        keep_positions = torch.cat([forced_keep, random_keep])
+        pred_x_t[b, prompt_len + keep_positions] = pred_x_0[b, prompt_len + keep_positions]
+        pred_mask_positions[b, prompt_len + keep_positions] = False
     
     # Step 4: pred_x_t -> pred_pred_x_0 (denoise pred_x_t)
     with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=config.fp16):

@@ -253,6 +253,7 @@ def _forward_denoising_mode(
                 attention_mask=attention_mask,
                 prompt_lens=prompt_lens,
                 alpha=alpha,
+                mask_positions=mask_positions,
                 mask_token_id=mask_token_id,
                 backbone=backbone,
                 config=config,
